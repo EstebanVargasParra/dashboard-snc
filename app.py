@@ -46,19 +46,6 @@ if file_risk and gdb_cargada:
     porcentaje_borde_risk = risk['porcentaje_area_efecto_borde'].iloc[3]
     tasa_descuento = risk['tasa_descuento'].iloc[3]
     anios = int(risk['horizonte_tiempo_anios'].iloc[3])
-    
-    # 2. Extracción de valores de GDB según indicaciones del R
-    # Usamos índices dinámicos con try/except para evitar errores si la GDB cambia de tamaño
-    def extraer_gdb(indice_r, default_val):
-        try:
-            return float(df_GDB['Valor'].iloc[indice_r - 1]) # R es base 1, Python base 0
-        except:
-            return default_val
-
-    BT_borde_val = extraer_gdb(10, 255.4)
-    COS_borde_val = extraer_gdb(164, 80.9)
-    BT_nucleo_val = extraer_gdb(1, 264.7)
-    COS_nucleo_val = extraer_gdb(143, 96.5)
 
     # CREAMOS LAS PESTAÑAS (TABS) PARA EL PANEL UNIFICADO
     st.title("Sistema de Modelado - Soluciones Naturales del Clima")
@@ -126,21 +113,54 @@ if file_risk and gdb_cargada:
     # --------------------------------------------------------------------------
     with tab2:
         st.subheader("⚙️ Parámetros del Modelo de Carbono")
-        st.markdown("Estos datos son calculados cruzando la **GDB** y tu archivo **Risk**.")
+        st.markdown("Las áreas provienen de tu archivo **Risk**. Los valores biológicos se seleccionan directamente de tu **GDB**.")
         
         # Cálculos de Área usando el Risk.xlsx
         borde_calc = total_area_risk * porcentaje_borde_risk
         nucleo_calc = total_area_risk - borde_calc
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info(f"**Área Total (Risk):** {total_area_risk:,.2f} ha\n\n"
-                    f"**Borde ({porcentaje_borde_risk*100}%):** {borde_calc:,.2f} ha\n\n"
-                    f"**Núcleo:** {nucleo_calc:,.2f} ha")
-        with c2:
-            st.warning("**Valores extraídos de la GDB:**\n\n"
-                       f"BT Borde: {BT_borde_val} | COS Borde: {COS_borde_val}\n\n"
-                       f"BT Núcleo: {BT_nucleo_val} | COS Núcleo: {COS_nucleo_val}")
+        st.info(f"**Área Total (Risk):** {total_area_risk:,.2f} ha | "
+                f"**Área Borde ({porcentaje_borde_risk*100}%):** {borde_calc:,.2f} ha | "
+                f"**Área Núcleo:** {nucleo_calc:,.2f} ha")
+
+        st.markdown("---")
+        st.subheader("🌲 Selección de Variables Biológicas (GDB)")
+        
+        # Filtramos la GDB para tener solo las filas con valores válidos de BA (Biomasa) y COS (Suelo)
+        df_valid = df_GDB.dropna(subset=['Valor'])
+        df_BA = df_valid[df_valid['Medida'] == 'BA']
+        df_COS = df_valid[df_valid['Medida'] == 'COS']
+        
+        # Funciones para darle formato visual a las opciones del desplegable
+        def format_ba(idx):
+            row = df_BA.loc[idx]
+            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} ({row['Valor']:.2f} tC/ha)"
+            
+        def format_cos(idx):
+            row = df_COS.loc[idx]
+            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} ({row['Valor']:.2f} tC/ha)"
+
+        # PANELES DESPLEGABLES
+        col_b, col_n = st.columns(2)
+        with col_b:
+            st.markdown("### Sector Borde")
+            idx_bt_borde = st.selectbox("Biomasa Total (BT)", options=df_BA.index, format_func=format_ba, index=0, key="bt_b")
+            idx_cos_borde = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=0, key="cos_b")
+            
+            BT_borde_val = df_BA.loc[idx_bt_borde, 'Valor']
+            COS_borde_val = df_COS.loc[idx_cos_borde, 'Valor']
+            
+        with col_n:
+            st.markdown("### Sector Núcleo")
+            # Para que por defecto no seleccione el mismo índice que el borde, le sumamos 1 si es posible
+            idx_def_bt = 1 if len(df_BA) > 1 else 0
+            idx_def_cos = 1 if len(df_COS) > 1 else 0
+            
+            idx_bt_nucleo = st.selectbox("Biomasa Total (BT)", options=df_BA.index, format_func=format_ba, index=idx_def_bt, key="bt_n")
+            idx_cos_nucleo = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=idx_def_cos, key="cos_n")
+            
+            BT_nucleo_val = df_BA.loc[idx_bt_nucleo, 'Valor']
+            COS_nucleo_val = df_COS.loc[idx_cos_nucleo, 'Valor']
 
         st.markdown("---")
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -149,7 +169,7 @@ if file_risk and gdb_cargada:
         Mt1 = col_m3.number_input("Año Modelo 1 (Mt1)", value=2009)
         Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
 
-        # Lógica Matemática idéntica a tu último R
+        # Lógica Matemática
         # Borde
         BTe_borde = BT_borde_val * 0.47 * (44/12)
         COSe_borde = (COS_borde_val / 20) * (44/12)
@@ -174,8 +194,8 @@ if file_risk and gdb_cargada:
 
         st.subheader("✅ Factores de Emisión Finales")
         c_res1, c_res2 = st.columns(2)
-        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha")
-        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha")
+        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha/año")
+        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha/año")
 
     # --------------------------------------------------------------------------
     # TAB 3: RIESGOS Y ESCALABILIDAD
@@ -184,8 +204,8 @@ if file_risk and gdb_cargada:
         st.subheader("🔗 1. Tasas Biológicas (Conectadas automáticamente)")
         # Las variables se heredan del Tab 2. Se muestran deshabilitadas para demostrar la interconexión.
         col_b, col_n = st.columns(2)
-        tasa_captura_borde = col_b.number_input("Tasa Captura Borde (Heredada)", value=Factor_borde, disabled=True)
-        tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (Heredada)", value=Factor_nucleo, disabled=True)
+        tasa_captura_borde = col_b.number_input("Tasa Captura Borde (Heredada del Tab 2)", value=Factor_borde, disabled=True)
+        tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (Heredada del Tab 2)", value=Factor_nucleo, disabled=True)
         
         st.subheader("⚙️ 2. Configuración de Escalabilidad")
         c1, c2, c3 = st.columns(3)
@@ -308,5 +328,3 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'Risk.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
-
-
