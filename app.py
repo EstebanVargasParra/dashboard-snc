@@ -84,9 +84,11 @@ if file_risk and gdb_cargada:
         resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
         resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
         
-        condiciones = [(resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
+        # ⚠️ Ajuste de seguridad: Ahora detecta tanto 'BA' como 'BT' para aplicar la penalidad correcta
+        condiciones = [(resumen['n_mediciones'] == 1) & (resumen['Medida'].isin(['BA', 'BT'])),
                        (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
                        (resumen['n_mediciones'] == 1)]
+        
         resumen['incertidumbre_pct'] = np.where(resumen['n_mediciones'] > 1,
             (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100, np.select(condiciones, [80.0, 90.0, 85.0], default=np.nan))
         
@@ -126,40 +128,41 @@ if file_risk and gdb_cargada:
         st.markdown("---")
         st.subheader("🌲 Selección de Variables Biológicas (GDB)")
         
-        # Filtramos la GDB para tener solo las filas con valores válidos de BA (Biomasa) y COS (Suelo)
+        # ⚠️ AJUSTE FINAL: Filtros estrictos de la columna "Medida"
         df_valid = df_GDB.dropna(subset=['Valor'])
-        df_BA = df_valid[df_valid['Medida'] == 'BA']
+        df_BT = df_valid[df_valid['Medida'].isin(['BA', 'BT'])] # Acepta tanto BA como BT por seguridad
         df_COS = df_valid[df_valid['Medida'] == 'COS']
         
         # Funciones para darle formato visual a las opciones del desplegable
-        def format_ba(idx):
-            row = df_BA.loc[idx]
-            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} ({row['Valor']:.2f} tC/ha)"
+        def format_bt(idx):
+            row = df_BT.loc[idx]
+            # Agregamos la Medida al texto para confirmar visualmente
+            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} | {row.get('Medida', '')}: {row['Valor']:.2f} tC/ha"
             
         def format_cos(idx):
             row = df_COS.loc[idx]
-            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} ({row['Valor']:.2f} tC/ha)"
+            return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} | {row.get('Medida', '')}: {row['Valor']:.2f} tC/ha"
 
         # PANELES DESPLEGABLES
         col_b, col_n = st.columns(2)
         with col_b:
             st.markdown("### Sector Borde")
-            idx_bt_borde = st.selectbox("Biomasa Total (BT)", options=df_BA.index, format_func=format_ba, index=0, key="bt_b")
+            idx_bt_borde = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=0, key="bt_b")
             idx_cos_borde = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=0, key="cos_b")
             
-            BT_borde_val = df_BA.loc[idx_bt_borde, 'Valor']
+            BT_borde_val = df_BT.loc[idx_bt_borde, 'Valor']
             COS_borde_val = df_COS.loc[idx_cos_borde, 'Valor']
             
         with col_n:
             st.markdown("### Sector Núcleo")
             # Para que por defecto no seleccione el mismo índice que el borde, le sumamos 1 si es posible
-            idx_def_bt = 1 if len(df_BA) > 1 else 0
+            idx_def_bt = 1 if len(df_BT) > 1 else 0
             idx_def_cos = 1 if len(df_COS) > 1 else 0
             
-            idx_bt_nucleo = st.selectbox("Biomasa Total (BT)", options=df_BA.index, format_func=format_ba, index=idx_def_bt, key="bt_n")
+            idx_bt_nucleo = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=idx_def_bt, key="bt_n")
             idx_cos_nucleo = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=idx_def_cos, key="cos_n")
             
-            BT_nucleo_val = df_BA.loc[idx_bt_nucleo, 'Valor']
+            BT_nucleo_val = df_BT.loc[idx_bt_nucleo, 'Valor']
             COS_nucleo_val = df_COS.loc[idx_cos_nucleo, 'Valor']
 
         st.markdown("---")
@@ -202,7 +205,6 @@ if file_risk and gdb_cargada:
     # --------------------------------------------------------------------------
     with tab3:
         st.subheader("🔗 1. Tasas Biológicas (Conectadas automáticamente)")
-        # Las variables se heredan del Tab 2. Se muestran deshabilitadas para demostrar la interconexión.
         col_b, col_n = st.columns(2)
         tasa_captura_borde = col_b.number_input("Tasa Captura Borde (Heredada del Tab 2)", value=Factor_borde, disabled=True)
         tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (Heredada del Tab 2)", value=Factor_nucleo, disabled=True)
