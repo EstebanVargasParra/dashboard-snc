@@ -32,13 +32,11 @@ if modulo == "1. Incertidumbre MRV":
     st.title("📊 Módulo de Incertidumbre - MRV")
     st.markdown("Visualiza e interactúa con la base de datos maestra (GDB). Puedes filtrar, ordenar o modificar temporalmente los valores para ver cómo cambia la incertidumbre en tiempo real.")
     
-    # ⚠️ IMPORTANTE: Cambia esta URL por el enlace "Raw" de tu archivo GDB.xlsx en GitHub
-    url_github = "https://github.com/EstebanVargasParra/dashboard-snc/blob/main/GDB.xlsx"
-    
     try:
-        # 1. Cargar datos de GitHub
-        with st.spinner('Sincronizando con base de datos en la nube...'):
-            df_GDB = pd.read_excel(url_github)
+        # 1. Cargar datos locales del repositorio
+        with st.spinner('Cargando base de datos GDB...'):
+            # Como ambos archivos están en el mismo repo, basta con poner el nombre
+            df_GDB = pd.read_excel("GDB.xlsx")
             
         # 2. Mostrar la base de datos interactiva al usuario
         st.subheader("🗄️ Base de Datos GDB (Vista Interactiva)")
@@ -307,6 +305,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
             fig_factor.add_hline(y=1.0, line_dash="dash", line_color="blue", annotation_text="Punto Base (1.0)")
             fig_factor.add_hline(y=0.4, line_dash="dot", line_color="grey")
             st.plotly_chart(fig_factor, use_container_width=True)
+
 
 
 
