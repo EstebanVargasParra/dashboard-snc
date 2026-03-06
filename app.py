@@ -3,11 +3,10 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 import plotly.express as px
+import plotly.graph_objects as go
 
-# ==============================================================================
-# CONFIGURACIÓN DE LA PÁGINA
-# ==============================================================================
-st.set_page_config(page_title="Dashboard SNC", layout="wide", page_icon="🌲")
+# Configuración de la página
+st.set_page_config(page_title="Dashboard SNC", layout="wide")
 
 # ==============================================================================
 # FUNCIÓN AUXILIAR: VPN
@@ -125,7 +124,7 @@ elif modulo == "2. Factor de Emisión":
     A1, A2 = 25187.94, 12292.83
     t1, t2 = 2024, 2025
 
-    if st.button("Calcular Factores", type="primary"):
+    if st.button("Calcular Factores"):
         # Cálculos Borde
         BTe_borde = BT_borde * 0.47 * (44/12)
         COSe_borde = (COS_borde / 20) * (44/12)
@@ -160,48 +159,21 @@ elif modulo == "2. Factor de Emisión":
 elif modulo == "3. Riesgo y Escalabilidad":
     st.title("📈 Motor Financiero y Monte Carlo")
     
-    # ⚠️ IMPORTANTE: Enlace a tu plantilla de Excel para los usuarios
-    url_plantilla = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/Plantilla_Risk.xlsx"
-    st.markdown(f"📥 [**Descargar Plantilla de Riesgo (Excel)**]({url_plantilla})")
-    
-    file_risk = st.file_uploader("Sube tu archivo Risk.xlsx completado", type=["xlsx"])
+    file_risk = st.file_uploader("Sube tu archivo Risk.xlsx", type=["xlsx"])
     
     if file_risk:
         df_risk_raw = pd.read_excel(file_risk, index_col=0)
         risk = df_risk_raw.T
         
-        st.markdown("---")
-        # --- PANEL DE TASAS BIOLÓGICAS ---
-        st.subheader("🌱 1. Parámetros Biológicos de Captura")
-        col_b, col_n = st.columns(2)
-        tasa_captura_borde = col_b.number_input("Tasa Captura Borde (tCO2e/ha/año)", value=21.74, step=1.0)
-        tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (tCO2e/ha/año)", value=32.60, step=1.0)
-        
-        # --- PANEL DE ESCALABILIDAD ---
-        st.subheader("⚙️ 2. Configuración de Escalabilidad")
-        
-        c1, c2, c3 = st.columns(3)
-        area_minima = c1.number_input("Área Mínima a simular (ha)", value=1000, step=500)
-        area_maxima = c2.number_input("Área Máxima a simular (ha)", value=100000, step=5000)
-        intervalo_sim = c3.number_input("Intervalos de simulación (ha)", value=500, step=100)
-        
-        c4, c5, c6, c7 = st.columns(4)
-        mult_max = c4.number_input("Tope Máximo Costos (Multiplicador)", value=3.0, step=0.1)
-        mult_min = c5.number_input("Tope Mínimo Costos (Multiplicador)", value=0.4, step=0.1)
-        eficiencia_base = c6.number_input("Eficiencia Base", value=1.0, step=0.1)
-        area_inflexion = c7.number_input("Área de Inflexión (ha)", value=10000, step=1000)
-        
-        st.markdown("---")
-        
-        # Parámetros Globales Fijos del Excel
+        # Parámetros Globales (Fila 4 = índice 3)
         tasa_descuento = risk['tasa_descuento'].iloc[3]
         anios = int(risk['horizonte_tiempo_anios'].iloc[3])
+        tasa_captura_borde, tasa_captura_nucleo = 21.74, 32.60
         n_iter = 10000
         
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
-        # Función del Motor Financiero
         def calcular_vpn_iter(v):
             area_total = v["area_total_proyecto_ha"]
             p_borde = v["porcentaje_area_efecto_borde"]
@@ -234,9 +206,9 @@ elif modulo == "3. Riesgo y Escalabilidad":
             
             return calcular_npv(tasa_descuento, flujos)
 
-        # SIMULACIÓN MONTE CARLO
-        if st.button("Ejecutar Simulación Monte Carlo", type="primary"):
-            with st.spinner('Simulando 10,000 escenarios...'):
+        if st.button("Ejecutar Simulación Monte Carlo (10,000 iteraciones)"):
+            with st.spinner('Simulando variables triangulares...'):
+                # Muestreo Monte Carlo (Numpy vectorizado)
                 simulaciones = {}
                 for var in vars_simular:
                     min_v = risk[var].iloc[0]
@@ -248,40 +220,44 @@ elif modulo == "3. Riesgo y Escalabilidad":
                 vpn_resultados = df_sim.apply(calcular_vpn_iter, axis=1).values
                 df_sim['VPN'] = vpn_resultados
                 
-                st.subheader("📊 3. Análisis de Riesgo")
-                col_m1, col_m2 = st.columns(2)
+                # Gráfica 1: Histograma interactivo
+                st.subheader("1. Distribución de la VPN")
+                fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Histograma de VPN Simulada", 
+                                        color_discrete_sequence=['#4C78A8'])
+                p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
+                fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
+                fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
+                fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
+                st.plotly_chart(fig_hist, use_container_width=True)
+
+                # Gráfica 2: Tornado Spearman
+                st.subheader("2. Sensibilidad (Tornado Spearman)")
+                correlaciones = {}
+                for var in vars_simular:
+                    corr, _ = stats.spearmanr(df_sim[var], df_sim['VPN'])
+                    correlaciones[var] = corr
                 
-                with col_m1:
-                    fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de VPN", color_discrete_sequence=['#4C78A8'])
-                    p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
-                    fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
-                    fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
-                    fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
+                fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', 
+                                     title="Impacto de las variables sobre la VPN",
+                                     color='Correlacion', color_continuous_scale="RdYlGn")
+                st.plotly_chart(fig_tornado, use_container_width=True)
 
-                with col_m2:
-                    correlaciones = {}
-                    for var in vars_simular:
-                        corr, _ = stats.spearmanr(df_sim[var], df_sim['VPN'])
-                        correlaciones[var] = corr
-                    df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
-                    fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', title="Sensibilidad (Tornado)", color='Correlacion', color_continuous_scale="RdYlGn")
-                    st.plotly_chart(fig_tornado, use_container_width=True)
-
-        # ANÁLISIS DE ESCALABILIDAD
-        st.subheader("⚖️ 4. Análisis de Punto de Equilibrio y Escalabilidad")
+        st.markdown("---")
+        st.subheader("3. Modelo de Escalabilidad Sigmoidal")
+        area_max = st.slider("Área Máxima a Simular (ha)", 10000, 200000, 100000, 5000)
         
+        # Parámetros sigmoidal
+        mult_max, mult_min, eficiencia_base = 3.0, 0.4, 1.0
         area_base = risk['area_total_proyecto_ha'].iloc[3]
-        try:
-            k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (area_base - area_inflexion)
-        except Exception:
-            k_steepness = 0.0005 
+        k_steepness = 0.0005
+        area_inflexion = area_base - (np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / k_steepness)
 
         def factor_sigmoidal(area):
             return mult_min + (mult_max - mult_min) / (1 + np.exp(k_steepness * (area - area_inflexion)))
 
-        areas_simuladas = np.arange(area_minima, area_maxima + intervalo_sim, intervalo_sim)
-        v_base = risk.iloc[1].to_dict() 
+        areas_simuladas = np.arange(1000, area_max + 500, 500)
+        v_base = risk.iloc[1].to_dict() # Escenario Probable
 
         resultados_escala = []
         for ha in areas_simuladas:
@@ -289,6 +265,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
             v_actual["area_total_proyecto_ha"] = ha
             f_escala = factor_sigmoidal(ha)
             
+            # Aplicar factor
             v_actual["costo_monitoreo_snc_usd_ha_anio"] *= f_escala
             v_actual["capex_cercado_perimetral_snc_usd_ha_borde"] *= f_escala
             v_actual["factor_salvaguarda_snc_usd_ha_anio"] *= f_escala
@@ -299,12 +276,13 @@ elif modulo == "3. Riesgo y Escalabilidad":
             
         df_esc = pd.DataFrame(resultados_escala)
         
+        # Encontrar Equilibrio
         df_eq = df_esc[df_esc['VPN'] >= 0]
         if not df_eq.empty:
             pto_eq = df_eq.iloc[0]['Hectareas']
-            st.success(f"✅ **Punto de Equilibrio alcanzado a las {pto_eq:,.0f} Hectáreas**")
+            st.success(f"⚖️ Punto de Equilibrio alcanzado a las **{pto_eq:,.0f} Hectáreas**")
         else:
-            st.error("❌ El proyecto no alcanza punto de equilibrio en el rango de área simulado.")
+            st.error("El proyecto no alcanza punto de equilibrio en el rango simulado.")
             pto_eq = None
             
         col_graf1, col_graf2 = st.columns(2)
@@ -317,10 +295,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
             st.plotly_chart(fig_vpn, use_container_width=True)
             
         with col_graf2:
-            fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Curva Sigmoidal (Multiplicador de Costo)")
-            fig_factor.add_hline(y=eficiencia_base, line_dash="dash", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
-            fig_factor.add_hline(y=mult_min, line_dash="dot", line_color="grey", annotation_text="Límite Operativo")
+            fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Curva Sigmoidal (Eficiencia)")
+            fig_factor.add_hline(y=1.0, line_dash="dash", line_color="blue", annotation_text="Punto Base (1.0)")
+            fig_factor.add_hline(y=0.4, line_dash="dot", line_color="grey")
             st.plotly_chart(fig_factor, use_container_width=True)
-
-
-
