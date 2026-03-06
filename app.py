@@ -84,7 +84,6 @@ if file_risk and gdb_cargada:
         resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
         resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
         
-        # ⚠️ Ajuste de seguridad: Ahora detecta tanto 'BA' como 'BT' para aplicar la penalidad correcta
         condiciones = [(resumen['n_mediciones'] == 1) & (resumen['Medida'].isin(['BA', 'BT'])),
                        (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
                        (resumen['n_mediciones'] == 1)]
@@ -128,40 +127,32 @@ if file_risk and gdb_cargada:
         st.markdown("---")
         st.subheader("🌲 Selección de Variables Biológicas (GDB)")
         
-        # ⚠️ AJUSTE FINAL: Filtros estrictos de la columna "Medida"
         df_valid = df_GDB.dropna(subset=['Valor'])
-        df_BT = df_valid[df_valid['Medida'].isin(['BA', 'BT'])] # Acepta tanto BA como BT por seguridad
+        df_BT = df_valid[df_valid['Medida'].isin(['BA', 'BT'])] 
         df_COS = df_valid[df_valid['Medida'] == 'COS']
         
-        # Funciones para darle formato visual a las opciones del desplegable
         def format_bt(idx):
             row = df_BT.loc[idx]
-            # Agregamos la Medida al texto para confirmar visualmente
             return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} | {row.get('Medida', '')}: {row['Valor']:.2f} tC/ha"
             
         def format_cos(idx):
             row = df_COS.loc[idx]
             return f"{row.get('Ecosistema', '')} - {row.get('Estado', '')} | {row.get('Medida', '')}: {row['Valor']:.2f} tC/ha"
 
-        # PANELES DESPLEGABLES
         col_b, col_n = st.columns(2)
         with col_b:
             st.markdown("### Sector Borde")
             idx_bt_borde = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=0, key="bt_b")
             idx_cos_borde = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=0, key="cos_b")
-            
             BT_borde_val = df_BT.loc[idx_bt_borde, 'Valor']
             COS_borde_val = df_COS.loc[idx_cos_borde, 'Valor']
             
         with col_n:
             st.markdown("### Sector Núcleo")
-            # Para que por defecto no seleccione el mismo índice que el borde, le sumamos 1 si es posible
             idx_def_bt = 1 if len(df_BT) > 1 else 0
             idx_def_cos = 1 if len(df_COS) > 1 else 0
-            
             idx_bt_nucleo = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=idx_def_bt, key="bt_n")
             idx_cos_nucleo = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=idx_def_cos, key="cos_n")
-            
             BT_nucleo_val = df_BT.loc[idx_bt_nucleo, 'Valor']
             COS_nucleo_val = df_COS.loc[idx_cos_nucleo, 'Valor']
 
@@ -173,7 +164,6 @@ if file_risk and gdb_cargada:
         Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
 
         # Lógica Matemática
-        # Borde
         BTe_borde = BT_borde_val * 0.47 * (44/12)
         COSe_borde = (COS_borde_val / 20) * (44/12)
         Fet_borde = (BTe_borde + COSe_borde) * 0.6
@@ -184,7 +174,6 @@ if file_risk and gdb_cargada:
         REp_borde = (EAlb_borde - EAp_borde)
         Factor_borde = REp_borde / borde_calc
 
-        # Núcleo
         BTe_nucleo = BT_nucleo_val * 0.47 * (44/12)
         COSe_nucleo = (COS_nucleo_val / 20) * (44/12)
         Fet_nucleo = (BTe_nucleo + COSe_nucleo) * 0.6
@@ -197,8 +186,8 @@ if file_risk and gdb_cargada:
 
         st.subheader("✅ Factores de Emisión Finales")
         c_res1, c_res2 = st.columns(2)
-        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha-año")
-        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha-año")
+        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha/año")
+        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha/año")
 
     # --------------------------------------------------------------------------
     # TAB 3: RIESGOS Y ESCALABILIDAD
@@ -209,7 +198,14 @@ if file_risk and gdb_cargada:
         tasa_captura_borde = col_b.number_input("Tasa Captura Borde (Heredada del Tab 2)", value=Factor_borde, disabled=True)
         tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (Heredada del Tab 2)", value=Factor_nucleo, disabled=True)
         
-        st.subheader("⚙️ 2. Configuración de Escalabilidad")
+        # --- NUEVO: SECCIÓN DE MERCADO ---
+        st.subheader("💰 2. Variables de Mercado")
+        st.markdown("Ajusta el precio base del carbono para evaluar su impacto en la viabilidad del proyecto.")
+        # Extraemos el valor "Probable" (índice 1 en Pandas es la Fila 2 de tu Risk original)
+        precio_carbono_base = float(risk['precio_carbono_usd_tco2e'].iloc[1])
+        precio_carbono_input = st.number_input("Precio del Carbono (USD/tCO2e)", value=precio_carbono_base, step=0.5)
+
+        st.subheader("⚙️ 3. Configuración de Escalabilidad")
         c1, c2, c3 = st.columns(3)
         area_minima = c1.number_input("Área Mínima a simular (ha)", value=1000, step=500)
         area_maxima = c2.number_input("Área Máxima a simular (ha)", value=100000, step=5000)
@@ -224,7 +220,8 @@ if file_risk and gdb_cargada:
         st.markdown("---")
         
         # Preparación de variables a simular
-        vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
+        # NOTA: Agregamos "precio_carbono_usd_tco2e" a exclusiones porque ahora lo controla el usuario manualmente
+        vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento", "precio_carbono_usd_tco2e"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
         def calcular_vpn_iter(v):
@@ -248,7 +245,8 @@ if file_risk and gdb_cargada:
             descuento = v["descuento_salvaguarda_tecnica"] + v["descuento_cambio_regulacion"] + v["descuento_variabilidad_climatica"]
             vol_creditos = area_total * tasa_captura_ha * v["eficiencia_snc"] * (1 - descuento)
             
-            precios = v["precio_carbono_usd_tco2e"] * (1 + v["crecimiento_precio_carbono"])**np.arange(1, anios + 1)
+            # ⚠️ AQUÍ UTILIZAMOS EL INPUT MANUAL DEL USUARIO PARA EL PRECIO DEL CARBONO
+            precios = precio_carbono_input * (1 + v["crecimiento_precio_carbono"])**np.arange(1, anios + 1)
             ingresos = np.zeros(anios + 1)
             ingresos[1:] = vol_creditos * precios
             
@@ -266,7 +264,7 @@ if file_risk and gdb_cargada:
                 vpn_resultados = df_sim.apply(calcular_vpn_iter, axis=1).values
                 df_sim['VPN'] = vpn_resultados
                 
-                st.subheader("📊 3. Análisis de Riesgo Financiero")
+                st.subheader("📊 4. Análisis de Riesgo Financiero")
                 
                 fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de la VPN", color_discrete_sequence=['lightgray'])
                 fig_hist.update_traces(marker_line_color='white', marker_line_width=1)
@@ -284,7 +282,7 @@ if file_risk and gdb_cargada:
                 st.plotly_chart(fig_tornado, use_container_width=True)
 
                 # Escalabilidad
-                st.subheader("⚖️ 4. Análisis de Punto de Equilibrio (Curva S)")
+                st.subheader("⚖️ 5. Análisis de Punto de Equilibrio (Curva S)")
                 area_base = risk['area_total_proyecto_ha'].iloc[3]
                 try:
                     k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (area_base - area_inflexion)
@@ -330,4 +328,3 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'Risk.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
-
