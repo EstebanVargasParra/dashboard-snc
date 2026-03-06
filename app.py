@@ -197,8 +197,8 @@ if file_risk and gdb_cargada:
 
         st.subheader("✅ Factores de Emisión Finales")
         c_res1, c_res2 = st.columns(2)
-        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha/año")
-        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha/año")
+        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha-año")
+        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha-año")
 
     # --------------------------------------------------------------------------
     # TAB 3: RIESGOS Y ESCALABILIDAD
@@ -330,3 +330,4 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'Risk.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
