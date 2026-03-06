@@ -35,43 +35,53 @@ if modulo == "1. Incertidumbre MRV":
     try:
         # 1. Cargar datos locales del repositorio
         with st.spinner('Cargando base de datos GDB...'):
-            # Como ambos archivos están en el mismo repo, basta con poner el nombre
             df_GDB = pd.read_excel("GDB.xlsx")
             
         # 2. Mostrar la base de datos interactiva al usuario
         st.subheader("🗄️ Base de Datos GDB (Vista Interactiva)")
         
-        # st.data_editor permite al usuario interactuar, cambiar números y agregar filas
         df_interactivo = st.data_editor(
             df_GDB, 
-            num_rows="dynamic", # Permite al usuario añadir filas nuevas si quiere probar
+            num_rows="dynamic",
             use_container_width=True,
-            height=300 # Altura de la tabla para que no ocupe toda la pantalla
+            height=300
         )
+        
+        # --- NUEVO: BOTÓN PARA DESCARGAR LA GDB ---
+        # Convertimos el DataFrame original a un formato que Streamlit pueda descargar
+        # NOTA: Usamos el df_GDB original para que descargue la base limpia, no la modificada temporalmente
+        import io
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_GDB.to_excel(writer, index=False)
+        
+        st.download_button(
+            label="📥 Descargar Base de Datos GDB Completa (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="Base_Datos_GDB_MRV.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
+        # ------------------------------------------
         
         st.markdown("---")
         st.subheader("📈 Resultados de Incertidumbre por Ecosistema")
         
         # 3. Hacer los cálculos usando la tabla interactiva (df_interactivo)
-        # Filtramos nulos de la columna Valor
         df = df_interactivo.dropna(subset=['Valor']).copy()
         
-        # Asegurarnos de que Valor sea numérico por si el usuario teclea texto por error
         df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce')
         df = df.dropna(subset=['Valor'])
         
-        # Agrupación y Estadísticas
         resumen = df.groupby(['Ecosistema', 'Medida']).agg(
             n_mediciones=('Valor', 'count'),
             promedio=('Valor', 'mean'),
             desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
         ).reset_index()
         
-        # Lógica matemática de incertidumbre
         resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
         resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
         
-        # Criterio Experto (Penalidad)
         condiciones = [
             (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
             (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
@@ -88,7 +98,6 @@ if modulo == "1. Incertidumbre MRV":
         resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
         resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
         
-        # Estatus de Calidad
         def status_calidad(row):
             if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
             if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
@@ -97,7 +106,7 @@ if modulo == "1. Incertidumbre MRV":
             
         resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
         
-        # 4. Mostrar Tablas de Resultados (Se actualizan si modifican la tabla de arriba)
+        # 4. Mostrar Tablas de Resultados
         ecosistemas = resumen['Ecosistema'].unique()
         for eco in ecosistemas:
             with st.expander(f"🌲 {eco} (Clic para ver detalles)", expanded=True):
@@ -107,7 +116,7 @@ if modulo == "1. Incertidumbre MRV":
                 st.dataframe(df_eco, use_container_width=True, hide_index=True)
             
     except Exception as e:
-        st.error(f"Error al conectar con la base de datos de GitHub. Detalle: {e}")
+        st.error(f"Error al cargar la base de datos GDB.xlsx. Verifique que el archivo exista en la misma carpeta que la app. Detalle: {e}")
 
 # ==============================================================================
 # MÓDULO 2: FACTOR DE EMISIÓN
@@ -305,6 +314,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
             fig_factor.add_hline(y=1.0, line_dash="dash", line_color="blue", annotation_text="Punto Base (1.0)")
             fig_factor.add_hline(y=0.4, line_dash="dot", line_color="grey")
             st.plotly_chart(fig_factor, use_container_width=True)
+
 
 
 
