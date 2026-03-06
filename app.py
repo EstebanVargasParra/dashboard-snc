@@ -35,7 +35,7 @@ if modulo == "1. Incertidumbre MRV":
     
     # URL de GitHub (Debe ser la versión "Raw" del archivo)
     url_github = st.text_input("Enlace Raw de GitHub (GDB.xlsx o CSV):", 
-                               value="https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.csv")
+                               value="https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.xlsx")
     
     uploaded_file = st.file_uploader("O sube el archivo GDB temporalmente aquí:", type=["xlsx", "csv"])
     
@@ -321,5 +321,6 @@ elif modulo == "3. Riesgo y Escalabilidad":
             fig_factor.add_hline(y=eficiencia_base, line_dash="dash", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
             fig_factor.add_hline(y=mult_min, line_dash="dot", line_color="grey", annotation_text="Límite Operativo")
             st.plotly_chart(fig_factor, use_container_width=True)
+
 
 
