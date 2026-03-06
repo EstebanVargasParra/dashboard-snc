@@ -309,3 +309,4 @@ elif modulo == "3. Riesgo y Escalabilidad":
             st.plotly_chart(fig_factor, use_container_width=True)
 
 
+
