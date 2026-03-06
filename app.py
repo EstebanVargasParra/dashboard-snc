@@ -263,39 +263,50 @@ elif modulo == "3. Riesgo y Escalabilidad":
                 df_sim['VPN'] = vpn_resultados
                 
                 st.subheader("📊 3. Análisis de Riesgo")
-                col_m1, col_m2 = st.columns(2)
                 
-                with col_m1:
-                    fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de VPN", color_discrete_sequence=['#4C78A8'])
-                    p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
-                    fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
-                    fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
-                    fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                # Gráfica 1: Histograma (AHORA MÁS GRANDE)
+                fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de la VPN (Análisis de Riesgo SNC)", color_discrete_sequence=['#lightgray'])
+                fig_hist.update_traces(marker_line_color='white', marker_line_width=1, opacity=0.8)
+                p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
+                fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
+                fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
+                fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
+                fig_hist.update_layout(height=500) # Forzamos mayor altura
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-                with col_m2:
-                    correlaciones = {}
-                    for var in vars_simular:
+                # Gráfica 2: Tornado Spearman (AHORA MÁS GRANDE Y CORREGIDO)
+                correlaciones = {}
+                for var in vars_simular:
+                    # Filtro anti-bugs: Solo calcula si la variable no es constante en el Excel
+                    if df_sim[var].std() > 0: 
                         corr, _ = stats.spearmanr(df_sim[var], df_sim['VPN'])
                         correlaciones[var] = corr
-                    df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
-                    fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', title="Sensibilidad (Tornado)", color='Correlacion', color_continuous_scale="RdYlGn")
-                    st.plotly_chart(fig_tornado, use_container_width=True)
+                        
+                df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
+                fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', 
+                                     title="Sensibilidad de Monte Carlo (Spearman)", 
+                                     color='Correlacion', color_continuous_scale="RdYlGn")
+                fig_tornado.update_layout(height=600) # Mayor altura para que los nombres no se corten
+                st.plotly_chart(fig_tornado, use_container_width=True)
 
         # ANÁLISIS DE ESCALABILIDAD
         st.subheader("⚖️ 4. Análisis de Punto de Equilibrio y Escalabilidad")
         
+        # MATEMÁTICA EXACTA AL SCRIPT R
         area_base = risk['area_total_proyecto_ha'].iloc[3]
         try:
+            # Cálculo de la pendiente (k_steepness) idéntico a R
             k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (area_base - area_inflexion)
         except Exception:
+            st.warning("Advertencia: Configuración de escalabilidad inválida. Revisa los multiplicadores.")
             k_steepness = 0.0005 
 
         def factor_sigmoidal(area):
+            # Fórmula sigmoidal idéntica a R
             return mult_min + (mult_max - mult_min) / (1 + np.exp(k_steepness * (area - area_inflexion)))
 
         areas_simuladas = np.arange(area_minima, area_maxima + intervalo_sim, intervalo_sim)
-        v_base = risk.iloc[1].to_dict() 
+        v_base = risk.iloc[1].to_dict() # Escenario "Probable"
 
         resultados_escala = []
         for ha in areas_simuladas:
@@ -303,6 +314,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
             v_actual["area_total_proyecto_ha"] = ha
             f_escala = factor_sigmoidal(ha)
             
+            # Aplicar factor de escala solo a las variables que indicaste en R
             v_actual["costo_monitoreo_snc_usd_ha_anio"] *= f_escala
             v_actual["capex_cercado_perimetral_snc_usd_ha_borde"] *= f_escala
             v_actual["factor_salvaguarda_snc_usd_ha_anio"] *= f_escala
@@ -313,25 +325,28 @@ elif modulo == "3. Riesgo y Escalabilidad":
             
         df_esc = pd.DataFrame(resultados_escala)
         
+        # Encontrar Punto de Equilibrio
         df_eq = df_esc[df_esc['VPN'] >= 0]
         if not df_eq.empty:
             pto_eq = df_eq.iloc[0]['Hectareas']
-            st.success(f"✅ **Punto de Equilibrio alcanzado a las {pto_eq:,.0f} Hectáreas**")
+            st.success(f"✅ **Equilibrio SIGMOIDAL alcanzado a las {pto_eq:,.0f} Hectáreas**")
         else:
-            st.error("❌ El proyecto no alcanza punto de equilibrio en el rango de área simulado.")
+            st.error("❌ El proyecto no logra punto de equilibrio ni con máxima escala.")
             pto_eq = None
             
-        col_graf1, col_graf2 = st.columns(2)
-        
-        with col_graf1:
-            fig_vpn = px.line(df_esc, x="Hectareas", y="VPN", title="Evolución de VPN vs Área")
-            fig_vpn.add_hline(y=0, line_dash="dash", line_color="red")
-            if pto_eq:
-                fig_vpn.add_vline(x=pto_eq, line_dash="dot", line_color="green", annotation_text="Break-even")
-            st.plotly_chart(fig_vpn, use_container_width=True)
+        # Gráfica 3: VPN vs Área (GRANDE)
+        fig_vpn = px.line(df_esc, x="Hectareas", y="VPN", title="Punto de Equilibrio: Modelo Sigmoidal")
+        fig_vpn.add_hline(y=0, line_dash="dash", line_color="red", line_width=2)
+        if pto_eq:
+            fig_vpn.add_vline(x=pto_eq, line_dash="dot", line_color="green", line_width=2, annotation_text=f"Break-even: {pto_eq:,.0f} ha")
+        fig_vpn.update_layout(height=500)
+        st.plotly_chart(fig_vpn, use_container_width=True)
             
-        with col_graf2:
-            fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Curva Sigmoidal (Multiplicador de Costo)")
-            fig_factor.add_hline(y=eficiencia_base, line_dash="dash", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
-            fig_factor.add_hline(y=mult_min, line_dash="dot", line_color="grey", annotation_text="Límite Operativo")
-            st.plotly_chart(fig_factor, use_container_width=True)
+        # Gráfica 4: Curva Sigmoidal (GRANDE)
+        fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Comportamiento del Factor de Costo (Curva Sigmoidal)")
+        fig_factor.update_traces(line_color="darkorange", line_width=3)
+        fig_factor.add_hline(y=eficiencia_base, line_dash="dot", line_color="blue", annotation_text=f"Multiplicador de Costo ({eficiencia_base} = Base)")
+        fig_factor.add_hline(y=mult_max, line_dash="dash", line_color="gray")
+        fig_factor.add_hline(y=mult_min, line_dash="dash", line_color="gray", annotation_text="Tope Mínimo (40%)")
+        fig_factor.update_layout(height=500)
+        st.plotly_chart(fig_factor, use_container_width=True)
