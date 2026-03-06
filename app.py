@@ -31,68 +31,78 @@ modulo = st.sidebar.radio("Seleccione el Módulo:",
 # ==============================================================================
 if modulo == "1. Incertidumbre MRV":
     st.title("📊 Módulo de Incertidumbre - MRV")
-    st.markdown("Calculando incertidumbre estadística en tiempo real desde la base de datos maestra (GDB).")
+    st.markdown("Este módulo se conecta a GitHub para calcular la incertidumbre en tiempo real.")
     
-    # ⚠️ IMPORTANTE: Cambia esta URL por el enlace "Raw" de tu archivo GDB.xlsx en GitHub
-    url_github = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.xlsx"
+    # URL de GitHub (Debe ser la versión "Raw" del archivo)
+    url_github = st.text_input("Enlace Raw de GitHub (GDB.xlsx o CSV):", 
+                               value="https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.csv")
     
-    try:
-        with st.spinner('Sincronizando con base de datos en la nube...'):
-            df_GDB = pd.read_excel(url_github)
+    uploaded_file = st.file_uploader("O sube el archivo GDB temporalmente aquí:", type=["xlsx", "csv"])
+    
+    if uploaded_file is not None or url_github:
+        try:
+            if uploaded_file:
+                if uploaded_file.name.endswith('.csv'):
+                    df_GDB = pd.read_csv(uploaded_file)
+                else:
+                    df_GDB = pd.read_excel(uploaded_file)
+            else:
+                # Si usa el link de Github
+                df_GDB = pd.read_csv(url_github)
             
-        # Filtramos nulos
-        df = df_GDB.dropna(subset=['Valor']).copy()
-        
-        # Agrupación y Estadísticas
-        resumen = df.groupby(['Ecosistema', 'Medida']).agg(
-            n_mediciones=('Valor', 'count'),
-            promedio=('Valor', 'mean'),
-            desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
-        ).reset_index()
-        
-        # Lógica matemática de incertidumbre
-        resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
-        resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
-        
-        # Criterio Experto (Penalidad)
-        condiciones = [
-            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
-            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
-            (resumen['n_mediciones'] == 1)
-        ]
-        elecciones = [80.0, 90.0, 85.0]
-        
-        resumen['incertidumbre_pct'] = np.where(
-            resumen['n_mediciones'] > 1,
-            (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
-            np.select(condiciones, elecciones, default=np.nan)
-        )
-        
-        resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
-        resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
-        
-        # Estatus de Calidad
-        def status_calidad(row):
-            if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
-            if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
-            if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
-            return "✅ Estadísticamente Sólido"
+            # Filtramos nulos
+            df = df_GDB.dropna(subset=['Valor']).copy()
             
-        resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
-        
-        st.success("Datos procesados correctamente.")
-        
-        # Mostrar Tablas por Ecosistema
-        ecosistemas = resumen['Ecosistema'].unique()
-        for eco in ecosistemas:
-            st.subheader(f"🌲 {eco}")
-            df_eco = resumen[resumen['Ecosistema'] == eco][['Medida', 'n_mediciones', 'promedio', 'incertidumbre_pct', 'Calidad_Estadistica']]
-            df_eco['incertidumbre_pct'] = df_eco['incertidumbre_pct'].round(2).astype(str) + '%'
-            df_eco['promedio'] = df_eco['promedio'].round(2)
-            st.dataframe(df_eco, use_container_width=True)
+            # Agrupación y Estadísticas
+            resumen = df.groupby(['Ecosistema', 'Medida']).agg(
+                n_mediciones=('Valor', 'count'),
+                promedio=('Valor', 'mean'),
+                desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
+            ).reset_index()
             
-    except Exception as e:
-        st.error(f"Error al conectar con la base de datos de GitHub. Detalle: {e}")
+            # Lógica matemática
+            resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
+            # t_val al 90% de confianza a dos colas (equivalente a qt(0.95) en R)
+            resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
+            
+            # Criterio Experto (Penalidad)
+            condiciones = [
+                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
+                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
+                (resumen['n_mediciones'] == 1)
+            ]
+            elecciones = [80.0, 90.0, 85.0]
+            
+            resumen['incertidumbre_pct'] = np.where(
+                resumen['n_mediciones'] > 1,
+                (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
+                np.select(condiciones, elecciones, default=np.nan)
+            )
+            
+            resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
+            resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
+            
+            # Estatus de Calidad
+            def status_calidad(row):
+                if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
+                if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
+                if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
+                return "✅ Estadísticamente Sólido"
+                
+            resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
+            
+            st.success("Datos procesados correctamente.")
+            
+            ecosistemas = resumen['Ecosistema'].unique()
+            for eco in ecosistemas:
+                st.subheader(f"🌲 {eco}")
+                df_eco = resumen[resumen['Ecosistema'] == eco][['Medida', 'n_mediciones', 'promedio', 'incertidumbre_pct', 'Calidad_Estadistica']]
+                df_eco['incertidumbre_pct'] = df_eco['incertidumbre_pct'].round(2).astype(str) + '%'
+                df_eco['promedio'] = df_eco['promedio'].round(2)
+                st.dataframe(df_eco, use_container_width=True)
+                
+        except Exception as e:
+            st.warning(f"Esperando datos válidos o revise el formato. Detalle: {e}")
 
 # ==============================================================================
 # MÓDULO 2: FACTOR DE EMISIÓN
@@ -311,4 +321,5 @@ elif modulo == "3. Riesgo y Escalabilidad":
             fig_factor.add_hline(y=eficiencia_base, line_dash="dash", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
             fig_factor.add_hline(y=mult_min, line_dash="dot", line_color="grey", annotation_text="Límite Operativo")
             st.plotly_chart(fig_factor, use_container_width=True)
+
 
