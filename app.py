@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 import plotly.express as px
-import plotly.graph_objects as go
 
-# Configuración de la página
-st.set_page_config(page_title="Dashboard SNC", layout="wide")
+# ==============================================================================
+# CONFIGURACIÓN DE LA PÁGINA
+# ==============================================================================
+st.set_page_config(page_title="Dashboard SNC", layout="wide", page_icon="🌲")
 
 # ==============================================================================
 # FUNCIÓN AUXILIAR: VPN
@@ -30,78 +31,68 @@ modulo = st.sidebar.radio("Seleccione el Módulo:",
 # ==============================================================================
 if modulo == "1. Incertidumbre MRV":
     st.title("📊 Módulo de Incertidumbre - MRV")
-    st.markdown("Este módulo se conecta a GitHub para calcular la incertidumbre en tiempo real.")
+    st.markdown("Calculando incertidumbre estadística en tiempo real desde la base de datos maestra (GDB).")
     
-    # URL de GitHub (Debe ser la versión "Raw" del archivo)
-    url_github = st.text_input("Enlace Raw de GitHub (GDB.xlsx o CSV):", 
-                               value="https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.csv")
+    # ⚠️ IMPORTANTE: Cambia esta URL por el enlace "Raw" de tu archivo GDB.xlsx en GitHub
+    url_github = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.xlsx"
     
-    uploaded_file = st.file_uploader("O sube el archivo GDB temporalmente aquí:", type=["xlsx", "csv"])
-    
-    if uploaded_file is not None or url_github:
-        try:
-            if uploaded_file:
-                if uploaded_file.name.endswith('.csv'):
-                    df_GDB = pd.read_csv(uploaded_file)
-                else:
-                    df_GDB = pd.read_excel(uploaded_file)
-            else:
-                # Si usa el link de Github
-                df_GDB = pd.read_csv(url_github)
+    try:
+        with st.spinner('Sincronizando con base de datos en la nube...'):
+            df_GDB = pd.read_excel(url_github)
             
-            # Filtramos nulos
-            df = df_GDB.dropna(subset=['Valor']).copy()
+        # Filtramos nulos
+        df = df_GDB.dropna(subset=['Valor']).copy()
+        
+        # Agrupación y Estadísticas
+        resumen = df.groupby(['Ecosistema', 'Medida']).agg(
+            n_mediciones=('Valor', 'count'),
+            promedio=('Valor', 'mean'),
+            desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
+        ).reset_index()
+        
+        # Lógica matemática de incertidumbre
+        resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
+        resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
+        
+        # Criterio Experto (Penalidad)
+        condiciones = [
+            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
+            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
+            (resumen['n_mediciones'] == 1)
+        ]
+        elecciones = [80.0, 90.0, 85.0]
+        
+        resumen['incertidumbre_pct'] = np.where(
+            resumen['n_mediciones'] > 1,
+            (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
+            np.select(condiciones, elecciones, default=np.nan)
+        )
+        
+        resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
+        resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
+        
+        # Estatus de Calidad
+        def status_calidad(row):
+            if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
+            if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
+            if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
+            return "✅ Estadísticamente Sólido"
             
-            # Agrupación y Estadísticas
-            resumen = df.groupby(['Ecosistema', 'Medida']).agg(
-                n_mediciones=('Valor', 'count'),
-                promedio=('Valor', 'mean'),
-                desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
-            ).reset_index()
+        resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
+        
+        st.success("Datos procesados correctamente.")
+        
+        # Mostrar Tablas por Ecosistema
+        ecosistemas = resumen['Ecosistema'].unique()
+        for eco in ecosistemas:
+            st.subheader(f"🌲 {eco}")
+            df_eco = resumen[resumen['Ecosistema'] == eco][['Medida', 'n_mediciones', 'promedio', 'incertidumbre_pct', 'Calidad_Estadistica']]
+            df_eco['incertidumbre_pct'] = df_eco['incertidumbre_pct'].round(2).astype(str) + '%'
+            df_eco['promedio'] = df_eco['promedio'].round(2)
+            st.dataframe(df_eco, use_container_width=True)
             
-            # Lógica matemática
-            resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
-            # t_val al 90% de confianza a dos colas (equivalente a qt(0.95) en R)
-            resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
-            
-            # Criterio Experto (Penalidad)
-            condiciones = [
-                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
-                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
-                (resumen['n_mediciones'] == 1)
-            ]
-            elecciones = [80.0, 90.0, 85.0]
-            
-            resumen['incertidumbre_pct'] = np.where(
-                resumen['n_mediciones'] > 1,
-                (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
-                np.select(condiciones, elecciones, default=np.nan)
-            )
-            
-            resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
-            resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
-            
-            # Estatus de Calidad
-            def status_calidad(row):
-                if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
-                if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
-                if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
-                return "✅ Estadísticamente Sólido"
-                
-            resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
-            
-            st.success("Datos procesados correctamente.")
-            
-            ecosistemas = resumen['Ecosistema'].unique()
-            for eco in ecosistemas:
-                st.subheader(f"🌲 {eco}")
-                df_eco = resumen[resumen['Ecosistema'] == eco][['Medida', 'n_mediciones', 'promedio', 'incertidumbre_pct', 'Calidad_Estadistica']]
-                df_eco['incertidumbre_pct'] = df_eco['incertidumbre_pct'].round(2).astype(str) + '%'
-                df_eco['promedio'] = df_eco['promedio'].round(2)
-                st.dataframe(df_eco, use_container_width=True)
-                
-        except Exception as e:
-            st.warning(f"Esperando datos válidos o revise el formato. Detalle: {e}")
+    except Exception as e:
+        st.error(f"Error al conectar con la base de datos de GitHub. Detalle: {e}")
 
 # ==============================================================================
 # MÓDULO 2: FACTOR DE EMISIÓN
@@ -124,7 +115,7 @@ elif modulo == "2. Factor de Emisión":
     A1, A2 = 25187.94, 12292.83
     t1, t2 = 2024, 2025
 
-    if st.button("Calcular Factores"):
+    if st.button("Calcular Factores", type="primary"):
         # Cálculos Borde
         BTe_borde = BT_borde * 0.47 * (44/12)
         COSe_borde = (COS_borde / 20) * (44/12)
@@ -159,21 +150,48 @@ elif modulo == "2. Factor de Emisión":
 elif modulo == "3. Riesgo y Escalabilidad":
     st.title("📈 Motor Financiero y Monte Carlo")
     
-    file_risk = st.file_uploader("Sube tu archivo Risk.xlsx", type=["xlsx"])
+    # ⚠️ IMPORTANTE: Enlace a tu plantilla de Excel para los usuarios
+    url_plantilla = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/Plantilla_Risk.xlsx"
+    st.markdown(f"📥 [**Descargar Plantilla de Riesgo (Excel)**]({url_plantilla})")
+    
+    file_risk = st.file_uploader("Sube tu archivo Risk.xlsx completado", type=["xlsx"])
     
     if file_risk:
         df_risk_raw = pd.read_excel(file_risk, index_col=0)
         risk = df_risk_raw.T
         
-        # Parámetros Globales (Fila 4 = índice 3)
+        st.markdown("---")
+        # --- PANEL DE TASAS BIOLÓGICAS ---
+        st.subheader("🌱 1. Parámetros Biológicos de Captura")
+        col_b, col_n = st.columns(2)
+        tasa_captura_borde = col_b.number_input("Tasa Captura Borde (tCO2e/ha/año)", value=21.74, step=1.0)
+        tasa_captura_nucleo = col_n.number_input("Tasa Captura Núcleo (tCO2e/ha/año)", value=32.60, step=1.0)
+        
+        # --- PANEL DE ESCALABILIDAD ---
+        st.subheader("⚙️ 2. Configuración de Escalabilidad")
+        
+        c1, c2, c3 = st.columns(3)
+        area_minima = c1.number_input("Área Mínima a simular (ha)", value=1000, step=500)
+        area_maxima = c2.number_input("Área Máxima a simular (ha)", value=100000, step=5000)
+        intervalo_sim = c3.number_input("Intervalos de simulación (ha)", value=500, step=100)
+        
+        c4, c5, c6, c7 = st.columns(4)
+        mult_max = c4.number_input("Tope Máximo Costos (Multiplicador)", value=3.0, step=0.1)
+        mult_min = c5.number_input("Tope Mínimo Costos (Multiplicador)", value=0.4, step=0.1)
+        eficiencia_base = c6.number_input("Eficiencia Base", value=1.0, step=0.1)
+        area_inflexion = c7.number_input("Área de Inflexión (ha)", value=10000, step=1000)
+        
+        st.markdown("---")
+        
+        # Parámetros Globales Fijos del Excel
         tasa_descuento = risk['tasa_descuento'].iloc[3]
         anios = int(risk['horizonte_tiempo_anios'].iloc[3])
-        tasa_captura_borde, tasa_captura_nucleo = 21.74, 32.60
         n_iter = 10000
         
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
+        # Función del Motor Financiero
         def calcular_vpn_iter(v):
             area_total = v["area_total_proyecto_ha"]
             p_borde = v["porcentaje_area_efecto_borde"]
@@ -206,9 +224,9 @@ elif modulo == "3. Riesgo y Escalabilidad":
             
             return calcular_npv(tasa_descuento, flujos)
 
-        if st.button("Ejecutar Simulación Monte Carlo (10,000 iteraciones)"):
-            with st.spinner('Simulando variables triangulares...'):
-                # Muestreo Monte Carlo (Numpy vectorizado)
+        # SIMULACIÓN MONTE CARLO
+        if st.button("Ejecutar Simulación Monte Carlo", type="primary"):
+            with st.spinner('Simulando 10,000 escenarios...'):
                 simulaciones = {}
                 for var in vars_simular:
                     min_v = risk[var].iloc[0]
@@ -220,44 +238,40 @@ elif modulo == "3. Riesgo y Escalabilidad":
                 vpn_resultados = df_sim.apply(calcular_vpn_iter, axis=1).values
                 df_sim['VPN'] = vpn_resultados
                 
-                # Gráfica 1: Histograma interactivo
-                st.subheader("1. Distribución de la VPN")
-                fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Histograma de VPN Simulada", 
-                                        color_discrete_sequence=['#4C78A8'])
-                p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
-                fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
-                fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
-                fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
-                st.plotly_chart(fig_hist, use_container_width=True)
-
-                # Gráfica 2: Tornado Spearman
-                st.subheader("2. Sensibilidad (Tornado Spearman)")
-                correlaciones = {}
-                for var in vars_simular:
-                    corr, _ = stats.spearmanr(df_sim[var], df_sim['VPN'])
-                    correlaciones[var] = corr
+                st.subheader("📊 3. Análisis de Riesgo")
+                col_m1, col_m2 = st.columns(2)
                 
-                df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
-                fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', 
-                                     title="Impacto de las variables sobre la VPN",
-                                     color='Correlacion', color_continuous_scale="RdYlGn")
-                st.plotly_chart(fig_tornado, use_container_width=True)
+                with col_m1:
+                    fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de VPN", color_discrete_sequence=['#4C78A8'])
+                    p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
+                    fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
+                    fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
+                    fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
+                    st.plotly_chart(fig_hist, use_container_width=True)
 
-        st.markdown("---")
-        st.subheader("3. Modelo de Escalabilidad Sigmoidal")
-        area_max = st.slider("Área Máxima a Simular (ha)", 10000, 200000, 100000, 5000)
+                with col_m2:
+                    correlaciones = {}
+                    for var in vars_simular:
+                        corr, _ = stats.spearmanr(df_sim[var], df_sim['VPN'])
+                        correlaciones[var] = corr
+                    df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
+                    fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', title="Sensibilidad (Tornado)", color='Correlacion', color_continuous_scale="RdYlGn")
+                    st.plotly_chart(fig_tornado, use_container_width=True)
+
+        # ANÁLISIS DE ESCALABILIDAD
+        st.subheader("⚖️ 4. Análisis de Punto de Equilibrio y Escalabilidad")
         
-        # Parámetros sigmoidal
-        mult_max, mult_min, eficiencia_base = 3.0, 0.4, 1.0
         area_base = risk['area_total_proyecto_ha'].iloc[3]
-        k_steepness = 0.0005
-        area_inflexion = area_base - (np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / k_steepness)
+        try:
+            k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (area_base - area_inflexion)
+        except Exception:
+            k_steepness = 0.0005 
 
         def factor_sigmoidal(area):
             return mult_min + (mult_max - mult_min) / (1 + np.exp(k_steepness * (area - area_inflexion)))
 
-        areas_simuladas = np.arange(1000, area_max + 500, 500)
-        v_base = risk.iloc[1].to_dict() # Escenario Probable
+        areas_simuladas = np.arange(area_minima, area_maxima + intervalo_sim, intervalo_sim)
+        v_base = risk.iloc[1].to_dict() 
 
         resultados_escala = []
         for ha in areas_simuladas:
@@ -265,7 +279,6 @@ elif modulo == "3. Riesgo y Escalabilidad":
             v_actual["area_total_proyecto_ha"] = ha
             f_escala = factor_sigmoidal(ha)
             
-            # Aplicar factor
             v_actual["costo_monitoreo_snc_usd_ha_anio"] *= f_escala
             v_actual["capex_cercado_perimetral_snc_usd_ha_borde"] *= f_escala
             v_actual["factor_salvaguarda_snc_usd_ha_anio"] *= f_escala
@@ -276,13 +289,12 @@ elif modulo == "3. Riesgo y Escalabilidad":
             
         df_esc = pd.DataFrame(resultados_escala)
         
-        # Encontrar Equilibrio
         df_eq = df_esc[df_esc['VPN'] >= 0]
         if not df_eq.empty:
             pto_eq = df_eq.iloc[0]['Hectareas']
-            st.success(f"⚖️ Punto de Equilibrio alcanzado a las **{pto_eq:,.0f} Hectáreas**")
+            st.success(f"✅ **Punto de Equilibrio alcanzado a las {pto_eq:,.0f} Hectáreas**")
         else:
-            st.error("El proyecto no alcanza punto de equilibrio en el rango simulado.")
+            st.error("❌ El proyecto no alcanza punto de equilibrio en el rango de área simulado.")
             pto_eq = None
             
         col_graf1, col_graf2 = st.columns(2)
@@ -295,7 +307,8 @@ elif modulo == "3. Riesgo y Escalabilidad":
             st.plotly_chart(fig_vpn, use_container_width=True)
             
         with col_graf2:
-            fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Curva Sigmoidal (Eficiencia)")
-            fig_factor.add_hline(y=1.0, line_dash="dash", line_color="blue", annotation_text="Punto Base (1.0)")
-            fig_factor.add_hline(y=0.4, line_dash="dot", line_color="grey")
+            fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Curva Sigmoidal (Multiplicador de Costo)")
+            fig_factor.add_hline(y=eficiencia_base, line_dash="dash", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
+            fig_factor.add_hline(y=mult_min, line_dash="dot", line_color="grey", annotation_text="Límite Operativo")
             st.plotly_chart(fig_factor, use_container_width=True)
+
