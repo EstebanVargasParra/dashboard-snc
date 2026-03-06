@@ -265,7 +265,7 @@ elif modulo == "3. Riesgo y Escalabilidad":
                 st.subheader("📊 3. Análisis de Riesgo")
                 
                 # Gráfica 1: Histograma (AHORA MÁS GRANDE)
-                fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de la VPN (Análisis de Riesgo SNC)", color_discrete_sequence=['#lightgray'])
+                fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de la VPN (Análisis de Riesgo SNC)", color_discrete_sequence=['lightgray'])
                 fig_hist.update_traces(marker_line_color='white', marker_line_width=1, opacity=0.8)
                 p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
                 fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
@@ -350,3 +350,4 @@ elif modulo == "3. Riesgo y Escalabilidad":
         fig_factor.add_hline(y=mult_min, line_dash="dash", line_color="gray", annotation_text="Tope Mínimo (40%)")
         fig_factor.update_layout(height=500)
         st.plotly_chart(fig_factor, use_container_width=True)
+
