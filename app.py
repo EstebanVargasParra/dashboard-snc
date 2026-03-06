@@ -30,78 +30,86 @@ modulo = st.sidebar.radio("Seleccione el Módulo:",
 # ==============================================================================
 if modulo == "1. Incertidumbre MRV":
     st.title("📊 Módulo de Incertidumbre - MRV")
-    st.markdown("Este módulo se conecta a GitHub para calcular la incertidumbre en tiempo real.")
+    st.markdown("Visualiza e interactúa con la base de datos maestra (GDB). Puedes filtrar, ordenar o modificar temporalmente los valores para ver cómo cambia la incertidumbre en tiempo real.")
     
-    # URL de GitHub (Debe ser la versión "Raw" del archivo)
-    url_github = st.text_input("Enlace Raw de GitHub (GDB.xlsx o CSV):", 
-                               value="https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.xlsx")
+    # ⚠️ IMPORTANTE: Cambia esta URL por el enlace "Raw" de tu archivo GDB.xlsx en GitHub
+    url_github = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/GDB.xlsx"
     
-    uploaded_file = st.file_uploader("O sube el archivo GDB temporalmente aquí:", type=["xlsx", "csv"])
-    
-    if uploaded_file is not None or url_github:
-        try:
-            if uploaded_file:
-                if uploaded_file.name.endswith('.csv'):
-                    df_GDB = pd.read_csv(uploaded_file)
-                else:
-                    df_GDB = pd.read_excel(uploaded_file)
-            else:
-                # Si usa el link de Github
-                df_GDB = pd.read_csv(url_github)
+    try:
+        # 1. Cargar datos de GitHub
+        with st.spinner('Sincronizando con base de datos en la nube...'):
+            df_GDB = pd.read_excel(url_github)
             
-            # Filtramos nulos
-            df = df_GDB.dropna(subset=['Valor']).copy()
+        # 2. Mostrar la base de datos interactiva al usuario
+        st.subheader("🗄️ Base de Datos GDB (Vista Interactiva)")
+        
+        # st.data_editor permite al usuario interactuar, cambiar números y agregar filas
+        df_interactivo = st.data_editor(
+            df_GDB, 
+            num_rows="dynamic", # Permite al usuario añadir filas nuevas si quiere probar
+            use_container_width=True,
+            height=300 # Altura de la tabla para que no ocupe toda la pantalla
+        )
+        
+        st.markdown("---")
+        st.subheader("📈 Resultados de Incertidumbre por Ecosistema")
+        
+        # 3. Hacer los cálculos usando la tabla interactiva (df_interactivo)
+        # Filtramos nulos de la columna Valor
+        df = df_interactivo.dropna(subset=['Valor']).copy()
+        
+        # Asegurarnos de que Valor sea numérico por si el usuario teclea texto por error
+        df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce')
+        df = df.dropna(subset=['Valor'])
+        
+        # Agrupación y Estadísticas
+        resumen = df.groupby(['Ecosistema', 'Medida']).agg(
+            n_mediciones=('Valor', 'count'),
+            promedio=('Valor', 'mean'),
+            desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
+        ).reset_index()
+        
+        # Lógica matemática de incertidumbre
+        resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
+        resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
+        
+        # Criterio Experto (Penalidad)
+        condiciones = [
+            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
+            (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
+            (resumen['n_mediciones'] == 1)
+        ]
+        elecciones = [80.0, 90.0, 85.0]
+        
+        resumen['incertidumbre_pct'] = np.where(
+            resumen['n_mediciones'] > 1,
+            (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
+            np.select(condiciones, elecciones, default=np.nan)
+        )
+        
+        resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
+        resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
+        
+        # Estatus de Calidad
+        def status_calidad(row):
+            if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
+            if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
+            if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
+            return "✅ Estadísticamente Sólido"
             
-            # Agrupación y Estadísticas
-            resumen = df.groupby(['Ecosistema', 'Medida']).agg(
-                n_mediciones=('Valor', 'count'),
-                promedio=('Valor', 'mean'),
-                desviacion=('Valor', lambda x: x.std(ddof=1) if len(x) > 1 else 0)
-            ).reset_index()
-            
-            # Lógica matemática
-            resumen['ee'] = np.where(resumen['n_mediciones'] > 1, resumen['desviacion'] / np.sqrt(resumen['n_mediciones']), np.nan)
-            # t_val al 90% de confianza a dos colas (equivalente a qt(0.95) en R)
-            resumen['t_val'] = np.where(resumen['n_mediciones'] > 1, stats.t.ppf(0.95, resumen['n_mediciones'] - 1), np.nan)
-            
-            # Criterio Experto (Penalidad)
-            condiciones = [
-                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'BA'),
-                (resumen['n_mediciones'] == 1) & (resumen['Medida'] == 'COS'),
-                (resumen['n_mediciones'] == 1)
-            ]
-            elecciones = [80.0, 90.0, 85.0]
-            
-            resumen['incertidumbre_pct'] = np.where(
-                resumen['n_mediciones'] > 1,
-                (resumen['t_val'] * resumen['ee'] / resumen['promedio']) * 100,
-                np.select(condiciones, elecciones, default=np.nan)
-            )
-            
-            resumen['margen_error'] = resumen['promedio'] * (resumen['incertidumbre_pct'] / 100)
-            resumen['Limite_Inferior'] = np.maximum(resumen['promedio'] - resumen['margen_error'], 0)
-            
-            # Estatus de Calidad
-            def status_calidad(row):
-                if row['n_mediciones'] == 1: return "🚨 Penalidad (n=1)"
-                if row['n_mediciones'] < 3: return "⚠️ Muestra Pequeña (n<3)"
-                if row['incertidumbre_pct'] > 20: return "🟠 Alta Variabilidad (>20%)"
-                return "✅ Estadísticamente Sólido"
-                
-            resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
-            
-            st.success("Datos procesados correctamente.")
-            
-            ecosistemas = resumen['Ecosistema'].unique()
-            for eco in ecosistemas:
-                st.subheader(f"🌲 {eco}")
+        resumen['Calidad_Estadistica'] = resumen.apply(status_calidad, axis=1)
+        
+        # 4. Mostrar Tablas de Resultados (Se actualizan si modifican la tabla de arriba)
+        ecosistemas = resumen['Ecosistema'].unique()
+        for eco in ecosistemas:
+            with st.expander(f"🌲 {eco} (Clic para ver detalles)", expanded=True):
                 df_eco = resumen[resumen['Ecosistema'] == eco][['Medida', 'n_mediciones', 'promedio', 'incertidumbre_pct', 'Calidad_Estadistica']]
                 df_eco['incertidumbre_pct'] = df_eco['incertidumbre_pct'].round(2).astype(str) + '%'
                 df_eco['promedio'] = df_eco['promedio'].round(2)
-                st.dataframe(df_eco, use_container_width=True)
-                
-        except Exception as e:
-            st.warning(f"Esperando datos válidos o revise el formato. Detalle: {e}")
+                st.dataframe(df_eco, use_container_width=True, hide_index=True)
+            
+    except Exception as e:
+        st.error(f"Error al conectar con la base de datos de GitHub. Detalle: {e}")
 
 # ==============================================================================
 # MÓDULO 2: FACTOR DE EMISIÓN
@@ -299,3 +307,4 @@ elif modulo == "3. Riesgo y Escalabilidad":
             fig_factor.add_hline(y=1.0, line_dash="dash", line_color="blue", annotation_text="Punto Base (1.0)")
             fig_factor.add_hline(y=0.4, line_dash="dot", line_color="grey")
             st.plotly_chart(fig_factor, use_container_width=True)
+
