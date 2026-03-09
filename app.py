@@ -59,9 +59,18 @@ if file_risk and gdb_cargada:
     
     st.sidebar.markdown("---")
     st.sidebar.subheader("💰 Variable de Mercado")
-    precio_carbono_base = float(risk['precio_carbono_usd_tco2e'].iloc[1])
-    precio_carbono_input = st.sidebar.number_input("Precio del Carbono (USD/tCO2e)", value=precio_carbono_base, step=0.5)
-
+    precio_carbono_excel = float(risk['precio_carbono_usd_tco2e'].iloc[1])
+    precio_carbono_input = st.sidebar.number_input(
+        "Precio del Carbono (USD/tCO2e)", 
+        value=precio_carbono_excel, 
+        step=0.5,
+        help="Este valor se hereda de tu archivo 'variables.xlsx'. Puedes borrarlo y escribir otro para simular."
+    )
+    if precio_carbono_input != precio_carbono_excel:
+        st.sidebar.warning(f"⚠️ Estás usando un precio modificado. Valor original en Excel: **${precio_carbono_excel}**")
+    else:
+        st.sidebar.caption("💡 *Precio heredado de la base de datos.*")
+        
     st.title("Sistema de Modelado - Soluciones Naturales del Clima")
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 1. Incertidumbre MRV", 
@@ -500,3 +509,4 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
