@@ -25,7 +25,6 @@ def calcular_npv(rate, cashflows):
     return sum([cf / (1 + rate)**i for i, cf in enumerate(cashflows)])
 
 def parse_mixed_type(val):
-    """Convierte los valores visuales (ej. '20%') en flotantes matemáticos (0.20)"""
     if isinstance(val, str):
         val = val.strip()
         if val.endswith('%'):
@@ -35,7 +34,7 @@ def parse_mixed_type(val):
     return float(val)
 
 # ==============================================================================
-# 1. BASE DE DATOS DE VARIABLES POR DEFECTO 
+# BASE DE DATOS DE VARIABLES POR DEFECTO
 # ==============================================================================
 default_vars = {
     "Variables": [
@@ -52,13 +51,10 @@ default_vars = {
     "Probable": [30100, "30%", "80%", "20%", "2%", "2%", 14.75, "6.57%", 100000, 600, 0, "25%", "10%", 5.3, 9.2, 0.6, "5%", 1800, "14%", "35%", "1.2%", 30, "35%", "12%", "105%"],
     "Alto": [181308, "40%", "90%", "30%", "3%", "3%", 16.95, "9.60%", 120000, 800, 0, "50%", "15%", 7, 12, 0.7, "7%", 2500, "20%", "40%", "1.5%", 40, "40%", "15%", "110%"]
 }
-# Regla estricta: Analisis_Parametrico siempre igual a Probable por defecto
 default_vars["Analisis_Parametrico"] = default_vars["Probable"].copy()
 
-# Guardamos en sesión para que los cambios se mantengan
 if 'df_risk' not in st.session_state:
     df_inicial = pd.DataFrame(default_vars)
-    # Forzamos todo a string para que el editor de Streamlit permita mezclar números y porcentajes sin bloquearse
     for col in ["Bajo", "Probable", "Alto", "Analisis_Parametrico"]:
         df_inicial[col] = df_inicial[col].astype(str)
     st.session_state.df_risk = df_inicial
@@ -69,7 +65,6 @@ if 'df_risk' not in st.session_state:
 st.sidebar.title("🌿 Análisis Integral SNC")
 st.sidebar.info("La plataforma opera de forma autónoma. Puedes modificar todas las variables de proyecto directamente en la **Pestaña 2**.")
 
-# Cargamos la GDB localmente
 try:
     df_GDB = pd.read_excel("GDB.xlsx")
     gdb_cargada = True
@@ -79,7 +74,7 @@ except Exception as e:
     gdb_cargada = False
 
 # ==============================================================================
-# FLUJO PRINCIPAL 
+# FLUJO PRINCIPAL
 # ==============================================================================
 if gdb_cargada:
     
@@ -88,7 +83,7 @@ if gdb_cargada:
         "📊 1. Incertidumbre MRV", 
         "☁️ 2. Factores y Variables", 
         "💵 3. Análisis Técnico Financiero", 
-        "📈 4. Análisis Probabilístico del TEA",
+        "📈 4. Análisis Probabilístico (TEA)",
         "📉 5. Curvas MACC"
     ])
 
@@ -139,7 +134,6 @@ if gdb_cargada:
     # TAB 2: FACTORES DE EMISIÓN + MATRIZ DE VARIABLES
     # --------------------------------------------------------------------------
     with tab2:
-        # PARTE 1: FACTORES DE EMISIÓN
         st.subheader("🌲 Parámetros del Modelo de Carbono")
         
         df_valid = df_GDB.dropna(subset=['Valor'])
@@ -172,8 +166,6 @@ if gdb_cargada:
         Mt1 = col_m3.number_input("Año Modelo 1 (Mt1)", value=2009)
         Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
 
-        # Cálculo Temporal de Emisión
-        # (El área real se calculará en la matriz de variables para mantener sincronía)
         BTe_borde = BT_borde_val * 0.47 * (44/12)
         COSe_borde = (COS_borde_val / 20) * (44/12)
         Fet_borde = (BTe_borde + COSe_borde) * 0.6
@@ -182,10 +174,9 @@ if gdb_cargada:
         COSe_nucleo = (COS_nucleo_val / 20) * (44/12)
         Fet_nucleo = (BTe_nucleo + COSe_nucleo) * 0.6
         
-        # PARTE 2: MATRIZ DE VARIABLES INTEGRADA
         st.markdown("---")
         st.subheader("📝 Matriz de Variables de Riesgo")
-        st.markdown("Haz doble clic en cualquier celda para editar (puedes usar el símbolo `%`). Cuando termines, presiona el botón para guardar los cambios.")
+        st.markdown("Haz doble clic en cualquier celda para editar. Al finalizar, presiona el botón de confirmación.")
         
         df_edited = st.data_editor(
             st.session_state.df_risk, 
@@ -195,10 +186,10 @@ if gdb_cargada:
         )
         
         if st.button("✅ Confirmar y Aplicar Variables", type="primary"):
+            df_edited["Analisis_Parametrico"] = df_edited["Probable"]
             st.session_state.df_risk = df_edited.copy()
-            st.success("¡Variables guardadas con éxito! Los módulos 3, 4 y 5 han sido actualizados.")
+            st.success("¡Variables guardadas con éxito! Los módulos 3, 4 y 5 están listos.")
 
-        # Procesamiento Matemático del DataFrame Guardado en Sesión
         df_numeric = st.session_state.df_risk.copy()
         for col in ["Bajo", "Probable", "Alto", "Analisis_Parametrico"]:
             df_numeric[col] = df_numeric[col].apply(parse_mixed_type)
@@ -208,7 +199,6 @@ if gdb_cargada:
         risk = df_numeric.T
         risk.columns = risk.columns.str.strip().str.lower()
 
-        # Extracción de variables paramétricas globales
         total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
         relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
         tasa_descuento = float(risk['tasa_descuento'].iloc[3])
@@ -218,7 +208,6 @@ if gdb_cargada:
         borde_calc = total_area_risk * relacion_borde_risk
         nucleo_calc = total_area_risk - borde_calc
 
-        # Terminar Cálculo de Factores
         cambio_superficie_borde = abs(((1/(Mt2-Mt1)) * np.log(A2/A1)) * borde_calc)
         CSV_borde = cambio_superficie_borde * (1 - 0.999)
         Factor_borde = (Fet_borde * cambio_superficie_borde - Fet_borde * CSV_borde) / borde_calc
@@ -380,7 +369,6 @@ if gdb_cargada:
                 df_tec.to_excel(buf_flujo, index=False)
                 st.download_button("📥 Descargar Análisis Técnico (.xlsx)", buf_flujo.getvalue(), "Analisis_Tecnico.xlsx")
 
-        # LÓGICA DE GUARDADO AL PORTAFOLIO MACC
         if st.session_state.last_computed:
             st.markdown("---")
             st.subheader("💾 Guardar este Escenario para la Curva MACC")
@@ -396,7 +384,7 @@ if gdb_cargada:
                 st.success(f"✅ ¡'{escenario_name}' añadido al portafolio! Ve a la Pestaña 5.")
 
     # --------------------------------------------------------------------------
-    # TAB 4: RIESGOS Y ESCALABILIDAD
+    # TAB 4: RIESGOS Y ESCALABILIDAD (AHORA SINCRONIZADO VECTORIALMENTE)
     # --------------------------------------------------------------------------
     with tab4:
         st.subheader("🔗 1. Tasas Biológicas (Heredadas de Pestaña 2)")
@@ -418,46 +406,102 @@ if gdb_cargada:
         
         st.markdown("---")
         
-        vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento", "precio_carbono_usd_tco2e"]
+        # ⚠️ Incluimos el Precio del Carbono en la simulación de riesgo (Lognormal)
+        vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
         def calcular_vpn_iter(v):
-            area_total = v["area_total_proyecto_ha"]
-            p_borde = v["relacion_area_efecto_borde"] 
-            area_borde = area_total * p_borde
-            area_nucleo = area_total * (1 - p_borde)
-            area_sp = area_total * v["relacion_area_sp_area_snc"]
-            tasa_captura_ha = (p_borde * tasa_captura_borde) + ((1 - p_borde) * tasa_captura_nucleo)
+            proyeccion = anios
+            anios_arr = np.arange(0, proyeccion + 1)
+            
+            area_borde = np.zeros(proyeccion + 1)
+            area_nucleo = np.zeros(proyeccion + 1)
+            if proyeccion >= 2:
+                area_borde[1] = v["area_total_proyecto_ha"] * v["relacion_area_efecto_borde"] / 2
+                area_borde[2] = v["area_total_proyecto_ha"] * v["relacion_area_efecto_borde"] / 2
+                area_nucleo[1] = v["area_total_proyecto_ha"] * (1 - v["relacion_area_efecto_borde"]) / 2
+                area_nucleo[2] = v["area_total_proyecto_ha"] * (1 - v["relacion_area_efecto_borde"]) / 2
+                
+            acum_borde = np.cumsum(area_borde)
+            acum_nucleo = np.cumsum(area_nucleo)
+            acum_borde[0] = 0; acum_nucleo[0] = 0
+            
+            emisiones = (acum_borde * Factor_borde + acum_nucleo * Factor_nucleo) * v["eficiencia_snc"]
+            salvaguarda = emisiones * v["descuento_salvaguarda_tecnica"]
+            camb_reg = emisiones * v["descuento_cambio_regulacion"]
+            var_clim = camb_reg 
+            carbono_neto = emisiones - salvaguarda - camb_reg - var_clim
+            
+            # Riesgo Lognormal para el precio
+            precio_base = v.get("precio_carbono_usd_tco2e", precio_carbono_input)
+            precios = precio_base * (1 + v["incremento_precio_carbono"])**anios_arr
+            precio_trading = np.zeros(proyeccion + 1)
+            if proyeccion >= 1: precio_trading[1:] = precios[:proyeccion]
+            ingresos_carbono = carbono_neto * precio_trading
             
             fac_aisla = 1.0 if v.get("relacion_area_aislamiento_area_snc", 1.0) == 0 else v.get("relacion_area_aislamiento_area_snc", 1.0)
-            siembra = v.get("siembra_arboles", 0.0)
+            fac_aisla_sp = 1.0 if v.get("relacion_area_sp_area_snc", 1.0) == 0 else v.get("relacion_area_sp_area_snc", 1.0)
             
-            capex_snc = v["capex_estudios_habilitantes_snc_usd"] + (v["capex_snc_usd_ha"] * area_borde * fac_aisla) + siembra
-            capex_sp_total = (v["capex_sp_usd_ha"] * area_sp) * v["variabilidad_sistema_productivo"]
-            capex_real = capex_snc + capex_sp_total + (v["factor_imprevistos_snc_usd_ha"] * area_total)
+            capex_est = np.zeros(proyeccion + 1); capex_est[0] = v["capex_estudios_habilitantes_snc_usd"]
+            capex_cons = np.zeros(proyeccion + 1)
+            siembra = v.get("siembra_arboles", 0)
+            if proyeccion >= 2:
+                capex_cons[0] = area_borde[1] * v["capex_snc_usd_ha"] * fac_aisla + siembra
+                capex_cons[1] = area_borde[2] * v["capex_snc_usd_ha"] * fac_aisla + siembra
+                
+            capex_sp = np.zeros(proyeccion + 1); capex_sp[0] = v["area_total_proyecto_ha"] * v["capex_sp_usd_ha"] * fac_aisla_sp
             
-            opex_snc = (capex_snc * v["operación_relacion_capex_snc"]) + ((v["monitoreo_snc_usd_ha_anio"] + v["factor_salvaguarda_snc_usd_ha_anio"]) * area_total)
-            opex_sp = capex_sp_total * v["opex_sp"]
+            opex_mant = np.zeros(proyeccion + 1)
+            if proyeccion >= 2: 
+                opex_mant[1] = acum_borde[1] * v["capex_snc_usd_ha"] * v["operación_relacion_capex_snc"] * fac_aisla
+                opex_mant[2] = acum_borde[2] * v["capex_snc_usd_ha"] * v["operación_relacion_capex_snc"] * fac_aisla
+            for i in range(3, proyeccion + 1): 
+                opex_mant[i] = opex_mant[i-1] * 1.03
+                
+            costo_salv = np.zeros(proyeccion + 1)
+            if proyeccion >= 3: 
+                val_salv = (acum_borde[1] + acum_nucleo[1]) * v["factor_salvaguarda_snc_usd_ha_anio"] * 2
+                costo_salv[1:4] = val_salv
+                
+            costo_mon = v["monitoreo_snc_usd_ha_anio"] * (acum_borde + acum_nucleo)
+            imprevistos = v["factor_imprevistos_snc_usd_ha"] * (acum_borde + acum_nucleo)
+            if proyeccion >= 18: imprevistos[18:] = 0
+                
+            costo_trans = np.zeros(proyeccion + 1)
+            trans_years = np.arange(2, proyeccion + 1, 3)
+            costo_trans[trans_years] = (0.06014 * v["area_total_proyecto_ha"]) + 25259
             
-            vector_opex = np.zeros(anios + 1)
-            vector_opex[1:11] = opex_snc + opex_sp
-            vector_opex[11:] = opex_snc
+            opex_sp_arr = np.zeros(proyeccion + 1)
+            if proyeccion >= 10: opex_sp_arr[1:11] = capex_sp[0] * v["opex_sp"]
+                
+            egresos_opex = opex_mant + costo_salv + costo_mon + imprevistos + costo_trans + opex_sp_arr
+            egresos_opex[0] = 0.0
             
-            descuento = v["descuento_salvaguarda_tecnica"] + v["descuento_cambio_regulacion"] + v["descuento_variabilidad_climatica"]
-            vol_creditos = area_total * tasa_captura_ha * v["eficiencia_snc"] * (1 - descuento)
+            ingresos_sp = np.zeros(proyeccion + 1)
+            if proyeccion >= 1: ingresos_sp[1] = capex_sp[0] * v.get("ingreso_sp", float(risk['ingreso_sp'].iloc[3]))
+            crec_sp = v.get("crecimiento_sp", float(risk['crecimiento_sp'].iloc[3]))
+            for i in range(2, proyeccion + 1): ingresos_sp[i] = ingresos_sp[i-1] * (1 + crec_sp)
+                
+            ebitda = ingresos_carbono - egresos_opex
+            depreciacion = np.zeros(proyeccion + 1)
+            if proyeccion >= 1: depreciacion[1] = (capex_sp[0]/10) + (capex_cons[0]/20)
+            if proyeccion >= 10: depreciacion[2:11] = depreciacion[1] + (capex_cons[1]/20)
+            if proyeccion >= 20: depreciacion[11:21] = (capex_cons[0]/20) + (capex_cons[1]/20)
+            if proyeccion >= 21: depreciacion[21] = capex_cons[1]/20
+                
+            ebit = ebitda - depreciacion
+            impuestos = ebit * v["tasa_impuestos"]
+            flujo_trading = (ebitda - impuestos) - capex_sp - capex_cons - capex_est
+            impuestos_comunidad = ingresos_sp * v["tasa_impuestos"]
             
-            precios = precio_carbono_input * (1 + v["incremento_precio_carbono"])**np.arange(1, anios + 1)
-            ingresos = np.zeros(anios + 1)
-            ingresos[1:] = vol_creditos * precios
+            t_desc = v.get("tasa_descuento", tasa_descuento)
+            vpn_trading = sum([cf / (1 + t_desc)**(i + 1) for i, cf in enumerate(flujo_trading)])
+            vpn_comunidad = sum([cf / (1 + t_desc)**(i + 1) for i, cf in enumerate(impuestos_comunidad[1:])])
             
-            flujos = ingresos - vector_opex
-            flujos = np.where(flujos > 0, flujos * (1 - v["tasa_impuestos"]), flujos)
-            flujos[0] = -capex_real
-            
-            return calcular_npv(tasa_descuento, flujos)
+            return vpn_trading + vpn_comunidad
 
         if st.button("🚀 Ejecutar Simulación Integral de Riesgo", type="primary"):
-            with st.spinner('Procesando Simulación Monte Carlo y Escalabilidad...'):
+            with st.spinner('Procesando Distribuciones Estadísticas y Monte Carlo...'):
                 
                 simulaciones = {}
                 for var in vars_simular:
@@ -472,8 +516,29 @@ if gdb_cargada:
                         
                         if safe_min == safe_max:
                             simulaciones[var] = np.full(10000, safe_min)
+                        elif var in ["tasa_impuestos", "descuento_cambio_regulacion"]:
+                            # DISTRIBUCIÓN UNIFORME (Políticas fiscales/regulaciones)
+                            simulaciones[var] = np.random.uniform(safe_min, safe_max, 10000)
+                        elif var in ["precio_carbono_usd_tco2e", "incremento_precio_carbono"]:
+                            # DISTRIBUCIÓN LOGNORMAL (Mercados Financieros)
+                            if safe_min <= 0:
+                                simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
+                            else:
+                                sigma = (np.log(safe_max) - np.log(safe_min)) / 3.29 # Aproximación 90% Confianza
+                                mu = np.log(safe_mode)
+                                simulaciones[var] = np.random.lognormal(mu, sigma, 10000)
+                        elif "capex" in var or "opex" in var or "costo" in var or "factor" in var or "descuento_variabilidad_climatica" in var:
+                            # DISTRIBUCIÓN BETA-PERT (Ingeniería y Costos)
+                            alpha = (4 * safe_mode + safe_max - 5 * safe_min) / (safe_max - safe_min)
+                            beta = (5 * safe_max - safe_min - 4 * safe_mode) / (safe_max - safe_min)
+                            if alpha <= 0 or beta <= 0:
+                                simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
+                            else:
+                                simulaciones[var] = stats.beta.rvs(alpha, beta, loc=safe_min, scale=safe_max-safe_min, size=10000)
                         else:
+                            # DISTRIBUCIÓN TRIANGULAR (Defecto biológico)
                             simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
+                            
                     except Exception as e:
                         st.error(f"Error procesando variable '{var}': {e}")
                         st.stop()
@@ -594,6 +659,3 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
-
-
-
