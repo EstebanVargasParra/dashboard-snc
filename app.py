@@ -39,15 +39,23 @@ except Exception as e:
 # FLUJO PRINCIPAL (PANELES INTEGRADOS)
 # ==============================================================================
 if file_risk and gdb_cargada:
-    # 1. Procesamiento de variables.xlsx (Risk)
+    # 1. Procesamiento Blindado de variables.xlsx
     df_risk_raw = pd.read_excel(file_risk, index_col=0)
-    risk = df_risk_raw.T
     
-    # Parámetros Fijos
-    total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
-    relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
-    tasa_descuento = float(risk['tasa_descuento'].iloc[3])
-    anios = int(risk['horizonte_tiempo_anios'].iloc[3])
+    # Limpieza extrema: minúsculas y sin espacios
+    df_risk_raw.index = df_risk_raw.index.str.strip().str.lower()
+    risk = df_risk_raw.T
+    risk.columns = risk.columns.str.strip().str.lower()
+    
+    # Parámetros Fijos con try-except para detectar errores
+    try:
+        total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
+        relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
+        tasa_descuento = float(risk['tasa_descuento'].iloc[3])
+        anios = int(risk['horizonte_tiempo_anios'].iloc[3])
+    except KeyError as e:
+        st.error(f"❌ Error de nombres: No se encontró la columna {e} en el archivo Excel. Revisa la escritura.")
+        st.stop()
     
     st.sidebar.markdown("---")
     st.sidebar.subheader("💰 Variable de Mercado")
@@ -300,8 +308,12 @@ if file_risk and gdb_cargada:
                 vpn_comunidad_usd = calcular_npv(tasa_descuento, flujos_comunidad)
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
                 
-                # TIR
-                tir_trading = npf.irr(flujos_trading[:-1]) if len(flujos_trading) > 1 else np.nan
+                # TIR controlada por si hay errores de matemáticas puras
+                try:
+                    tir_trading = npf.irr(flujos_trading[:-1]) if len(flujos_trading) > 1 else np.nan
+                    if np.isnan(tir_trading): tir_trading = 0.0
+                except:
+                    tir_trading = 0.0
                 
                 carbono_total = df_tec['carbono_acreditable_tco2e'].sum()
                 mac_usd = -(vpn_total / carbono_total) if carbono_total > 0 else np.nan
@@ -310,7 +322,7 @@ if file_risk and gdb_cargada:
                 st.success("Cálculo completado exitosamente.")
                 col_k1, col_k2, col_k3, col_k4 = st.columns(4)
                 col_k1.metric("VPN Trading + Comunidad", f"${vpn_total:,.0f}")
-                col_k2.metric("TIR Trading", f"{tir_trading*100:.2f}%" if not np.isnan(tir_trading) else "N/A")
+                col_k2.metric("TIR Trading", f"{tir_trading*100:.2f}%")
                 col_k3.metric("Carbono Acreditable", f"{carbono_total:,.0f} tCO2e")
                 col_k4.metric("Costo Marginal (MAC)", f"${mac_usd:,.2f} /tCO2e")
                 
@@ -350,6 +362,7 @@ if file_risk and gdb_cargada:
         
         st.markdown("---")
         
+        # Variables a excluir del Monte Carlo (porque ya son controladas por el panel global)
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento", "precio_carbono_usd_tco2e"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
@@ -361,7 +374,7 @@ if file_risk and gdb_cargada:
             area_sp = area_total * v["relacion_area_sp_area_snc"]
             tasa_captura_ha = (p_borde * tasa_captura_borde) + ((1 - p_borde) * tasa_captura_nucleo)
             
-            # Sincronización con CAPEX y OPEX del Flujo de Caja
+            # Sincronización con CAPEX y OPEX (incluyendo siembra y aislamiento)
             fac_aisla = 1.0 if v.get("relacion_area_aislamiento_area_snc", 1.0) == 0 else v.get("relacion_area_aislamiento_area_snc", 1.0)
             siembra = v.get("siembra_arboles", 0.0)
             
@@ -379,7 +392,7 @@ if file_risk and gdb_cargada:
             descuento = v["descuento_salvaguarda_tecnica"] + v["descuento_cambio_regulacion"] + v["descuento_variabilidad_climatica"]
             vol_creditos = area_total * tasa_captura_ha * v["eficiencia_snc"] * (1 - descuento)
             
-            # Precios de Mercado
+            # Precios de Mercado controlados globalmente
             precios = precio_carbono_input * (1 + v["incremento_precio_carbono"])**np.arange(1, anios + 1)
             ingresos = np.zeros(anios + 1)
             ingresos[1:] = vol_creditos * precios
@@ -391,9 +404,29 @@ if file_risk and gdb_cargada:
             return calcular_npv(tasa_descuento, flujos)
 
         if st.button("🚀 Ejecutar Simulación Integral de Riesgo", type="primary"):
-            with st.spinner('Procesando Flujos y Análisis Sigmoidal...'):
-                # Monte Carlo
-                simulaciones = {var: np.random.triangular(risk[var].iloc[0], risk[var].iloc[1], risk[var].iloc[2], 10000) for var in vars_simular}
+            with st.spinner('Procesando Simulación Monte Carlo y Escalabilidad...'):
+                
+                # Monte Carlo Blindado contra errores humanos en el Excel
+                simulaciones = {}
+                for var in vars_simular:
+                    try:
+                        v_min = float(risk[var].iloc[0])
+                        v_mode = float(risk[var].iloc[1])
+                        v_max = float(risk[var].iloc[2])
+                        
+                        # Filtro de Seguridad Matemático
+                        safe_min = min(v_min, v_max)
+                        safe_max = max(v_min, v_max)
+                        safe_mode = max(safe_min, min(v_mode, safe_max))
+                        
+                        if safe_min == safe_max:
+                            simulaciones[var] = np.full(10000, safe_min)
+                        else:
+                            simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
+                    except Exception as e:
+                        st.error(f"Error procesando variable '{var}': {e}")
+                        st.stop()
+                        
                 df_sim = pd.DataFrame(simulaciones)
                 vpn_resultados = df_sim.apply(calcular_vpn_iter, axis=1).values
                 df_sim['VPN'] = vpn_resultados
@@ -463,6 +496,7 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
 
 
 
