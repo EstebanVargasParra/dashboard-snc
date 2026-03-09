@@ -87,8 +87,8 @@ if gdb_cargada:
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 1. Incertidumbre MRV", 
         "☁️ 2. Factores y Variables", 
-        "💵 3. Análisis Técnico", 
-        "📈 4. Riesgos",
+        "💵 3. Análisis Técnico Financiero", 
+        "📈 4. Análisis Probabilístico del TEA",
         "📉 5. Curvas MACC"
     ])
 
@@ -594,5 +594,6 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
+
 
 
