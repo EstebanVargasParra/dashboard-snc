@@ -310,8 +310,8 @@ if file_risk and gdb_cargada:
                 flujos_trading = df_tec['flujo_caja_libre_trading_usd'].values
                 flujos_comunidad = df_tec['impuestos_comunidad_usd'].values
                 
-                vpn_precio_usd = calcular_npv(tasa_descuento, flujos_trading)
-                vpn_comunidad_usd = calcular_npv(tasa_descuento, flujos_comunidad)
+                vpn_precio_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_trading)])
+                vpn_comunidad_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_comunidad[1:])])
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
                 
                 # TIR con exclusión del último año (Espejo exacto de tu FinCal::irr en R)
@@ -502,6 +502,7 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
 
 
 
