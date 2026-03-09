@@ -156,7 +156,7 @@ if gdb_cargada:
         df_numeric.set_index("Variables", inplace=True)
         df_numeric.index = df_numeric.index.str.strip().str.lower()
         risk = df_numeric.T
-        risk.columns = risk.columns.str.strip().str.lower()
+        risk.index = risk.index.str.strip().str.lower()
 
         # EXTRACCIÓN MAESTRA: Todo se lee de la fila 'Analisis_Parametrico'
         v_param = risk.loc['analisis_parametrico']
@@ -656,3 +656,4 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
+
