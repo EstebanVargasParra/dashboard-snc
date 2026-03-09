@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 import plotly.express as px
-import plotly.graph_objects as go
 import io
 import numpy_financial as npf
 
@@ -13,6 +12,7 @@ import numpy_financial as npf
 st.set_page_config(page_title="Dashboard Integral SNC", layout="wide", page_icon="🌿")
 
 def calcular_npv(rate, cashflows):
+    # Función para Monte Carlo (Año 0 a Año 30)
     return sum([cf / (1 + rate)**i for i, cf in enumerate(cashflows)])
 
 # ==============================================================================
@@ -47,14 +47,14 @@ if file_risk and gdb_cargada:
     risk = df_risk_raw.T
     risk.columns = risk.columns.str.strip().str.lower()
     
-    # Parámetros Fijos con try-except para detectar errores
+    # Parámetros Fijos
     try:
         total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
         relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
         tasa_descuento = float(risk['tasa_descuento'].iloc[3])
         anios = int(risk['horizonte_tiempo_anios'].iloc[3])
     except KeyError as e:
-        st.error(f"❌ Error de nombres: No se encontró la columna {e} en el archivo Excel. Revisa la escritura.")
+        st.error(f"❌ Error de nombres: No se encontró la columna {e} en el archivo Excel.")
         st.stop()
     
     st.sidebar.markdown("---")
@@ -201,7 +201,7 @@ if file_risk and gdb_cargada:
         proyeccion = c_t2.number_input("Años de Proyección", value=30, step=1)
         
         if st.button("Generar Flujo de Caja", type="primary"):
-            with st.spinner("Construyendo proyecciones financieras..."):
+            with st.spinner("Sincronizando flujos con R..."):
                 anios_arr = np.arange(anio_inicio, anio_inicio + proyeccion + 1)
                 df_tec = pd.DataFrame({'Proyecciones': anios_arr})
                 
@@ -212,17 +212,17 @@ if file_risk and gdb_cargada:
                 area_borde_calc = total_area_risk * relacion_borde_risk / 2
                 area_nucleo_calc = total_area_risk * (1 - relacion_borde_risk) / 2
                 
+                # En R: [anio_inicio+1, anio_inicio+2] que son Índices 1 y 2 en Python
                 mask_años = df_tec['Proyecciones'].isin([anio_inicio + 1, anio_inicio + 2])
                 df_tec.loc[mask_años, 'area_borde_proyecto_ha'] = area_borde_calc
                 df_tec.loc[mask_años, 'area_nucleo_proyecto_ha'] = area_nucleo_calc
                 
                 df_tec['area_acumulada_borde_anual_ha'] = df_tec['area_borde_proyecto_ha'].cumsum()
                 df_tec['area_acumulada_nucleo_anual_ha'] = df_tec['area_nucleo_proyecto_ha'].cumsum()
-                
                 # Reset para el año base (Año 0) igual al ifelse en R
                 df_tec.loc[df_tec['Proyecciones'] < anio_inicio + 1, ['area_acumulada_borde_anual_ha', 'area_acumulada_nucleo_anual_ha']] = 0.0
                 
-                # 2. Carbono (variabilidad climática igual a cambio regulación, como en R)
+                # 2. Carbono
                 df_tec['emisiones_evitas_eficiencia_tco2e'] = (df_tec['area_acumulada_borde_anual_ha']*Factor_borde + df_tec['area_acumulada_nucleo_anual_ha']*Factor_nucleo) * float(risk['eficiencia_snc'].iloc[3])
                 df_tec['salvaguarda_tecnica_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_salvaguarda_tecnica'].iloc[3])
                 df_tec['cambio_regulacion_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_cambio_regulacion'].iloc[3])
@@ -230,21 +230,21 @@ if file_risk and gdb_cargada:
                 
                 df_tec['carbono_acreditable_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] - df_tec['salvaguarda_tecnica_tco2e'] - df_tec['cambio_regulacion_tco2e'] - df_tec['variabilidad_climatica_tco2e']
                 
-                # 3. Precios (MERCADO MANUAL - Ajuste de vector para R)
+                # 3. Precios (Desfase de índice arreglado para coincidir con R)
                 precios = precio_carbono_input * (1 + float(risk['incremento_precio_carbono'].iloc[3]))**np.arange(0, proyeccion + 1)
                 df_tec['precio_carbono_trading_usd_tco2e'] = 0.0
                 df_tec.loc[df_tec['Proyecciones'] >= anio_inicio + 1, 'precio_carbono_trading_usd_tco2e'] = precios[:proyeccion]
                 df_tec['precio_carbono_ecp_usd_tco2e'] = df_tec['precio_carbono_trading_usd_tco2e']
                 
-                # 4. CAPEX (Aislamiento y Siembra)
+                # 4. CAPEX (Aislamiento y Siembra - Índices 0 y 1 arreglados)
                 df_tec['capex_estudios_snc_usd'] = 0.0
                 df_tec.loc[0, 'capex_estudios_snc_usd'] = float(risk['capex_estudios_habilitantes_snc_usd'].iloc[3])
                 
                 fac_aisla = 1.0 if float(risk['relacion_area_aislamiento_area_snc'].iloc[3]) == 0 else float(risk['relacion_area_aislamiento_area_snc'].iloc[3])
                 df_tec['capex_conservacion_snc_usd'] = 0.0
                 if proyeccion >= 2:
-                    df_tec.loc[1, 'capex_conservacion_snc_usd'] = df_tec.loc[1, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
-                    df_tec.loc[2, 'capex_conservacion_snc_usd'] = df_tec.loc[2, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
+                    df_tec.loc[0, 'capex_conservacion_snc_usd'] = df_tec.loc[1, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
+                    df_tec.loc[1, 'capex_conservacion_snc_usd'] = df_tec.loc[2, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
                 
                 # 5. OPEX SNC
                 df_tec['opex_mantenimiento_snc_usd'] = 0.0
@@ -255,7 +255,8 @@ if file_risk and gdb_cargada:
                 
                 df_tec['costo_salvaguarda_snc_usd_anio'] = 0.0
                 if proyeccion >= 3:
-                    df_tec.loc[1:3, 'costo_salvaguarda_snc_usd_anio'] = (df_tec.loc[1:3, 'area_acumulada_borde_anual_ha'] + df_tec.loc[1:3, 'area_acumulada_nucleo_anual_ha']) * float(risk['factor_salvaguarda_snc_usd_ha_anio'].iloc[3]) * 2
+                    val_salv = (df_tec.loc[1, 'area_acumulada_borde_anual_ha'] + df_tec.loc[1, 'area_acumulada_nucleo_anual_ha']) * float(risk['factor_salvaguarda_snc_usd_ha_anio'].iloc[3]) * 2
+                    df_tec.loc[1:3, 'costo_salvaguarda_snc_usd_anio'] = val_salv
                 
                 df_tec['costo_monitoreo_snc_usd'] = float(risk['monitoreo_snc_usd_ha_anio'].iloc[3]) * (df_tec['area_acumulada_borde_anual_ha'] + df_tec['area_acumulada_nucleo_anual_ha'])
                 
@@ -290,12 +291,12 @@ if file_risk and gdb_cargada:
                 
                 df_tec['ebitda_trading_usd'] = df_tec['ingresos_carbono_trading_usd'] - df_tec['egresos_opex_totales_usd']
                 
-                # 8. Depreciación y Financieros
+                # 8. Depreciación y Financieros (Desfase de índices arreglado)
                 df_tec['depreciacion_trading_usd'] = 0.0
-                if proyeccion >= 1: df_tec.loc[1, 'depreciacion_trading_usd'] = (df_tec.loc[0, 'capex_sistema_productivo_usd']/10) + (df_tec.loc[1, 'capex_conservacion_snc_usd']/20)
-                if proyeccion >= 10: df_tec.loc[2:10, 'depreciacion_trading_usd'] = df_tec.loc[1, 'depreciacion_trading_usd'] + (df_tec.loc[2, 'capex_conservacion_snc_usd']/20)
-                if proyeccion >= 20: df_tec.loc[11:20, 'depreciacion_trading_usd'] = (df_tec.loc[1, 'capex_conservacion_snc_usd']/20) + (df_tec.loc[2, 'capex_conservacion_snc_usd']/20)
-                if proyeccion >= 21: df_tec.loc[21, 'depreciacion_trading_usd'] = df_tec.loc[2, 'capex_conservacion_snc_usd']/20
+                if proyeccion >= 1: df_tec.loc[1, 'depreciacion_trading_usd'] = (df_tec.loc[0, 'capex_sistema_productivo_usd']/10) + (df_tec.loc[0, 'capex_conservacion_snc_usd']/20)
+                if proyeccion >= 10: df_tec.loc[2:10, 'depreciacion_trading_usd'] = df_tec.loc[1, 'depreciacion_trading_usd'] + (df_tec.loc[1, 'capex_conservacion_snc_usd']/20)
+                if proyeccion >= 20: df_tec.loc[11:20, 'depreciacion_trading_usd'] = (df_tec.loc[0, 'capex_conservacion_snc_usd']/20) + (df_tec.loc[1, 'capex_conservacion_snc_usd']/20)
+                if proyeccion >= 21: df_tec.loc[21, 'depreciacion_trading_usd'] = df_tec.loc[1, 'capex_conservacion_snc_usd']/20
                 
                 df_tec['ebit_trading_usd'] = df_tec['ebitda_trading_usd'] - df_tec['depreciacion_trading_usd']
                 df_tec['impuestos_trading_usd'] = df_tec['ebit_trading_usd'] * float(risk['tasa_impuestos'].iloc[3])
@@ -306,15 +307,15 @@ if file_risk and gdb_cargada:
                 df_tec['impuestos_comunidad_usd'] = df_tec['ingresos_sp_usd'] * float(risk['tasa_impuestos'].iloc[3])
                 df_tec['utilidad_neta_comunidad_usd'] = df_tec['ingresos_sp_usd'] - df_tec['impuestos_comunidad_usd']
                 
-                # 9. Cálculo de VPN, TIR y MAC
+                # 9. Cálculo de VPN, TIR y MAC (MATEMÁTICA EXACTA A R)
                 flujos_trading = df_tec['flujo_caja_libre_trading_usd'].values
                 flujos_comunidad = df_tec['impuestos_comunidad_usd'].values
                 
+                # Aplicamos el exponente (i + 1) para que el año 2027 inicie con exponente ^1 como en R
                 vpn_precio_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_trading)])
                 vpn_comunidad_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_comunidad[1:])])
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
                 
-                # TIR con exclusión del último año (Espejo exacto de tu FinCal::irr en R)
                 try:
                     tir_trading = npf.irr(flujos_trading[:-1]) if len(flujos_trading) > 1 else np.nan
                     if np.isnan(tir_trading): tir_trading = 0.0
@@ -368,7 +369,6 @@ if file_risk and gdb_cargada:
         
         st.markdown("---")
         
-        # Variables a excluir del Monte Carlo (porque ya son controladas por el panel global)
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento", "precio_carbono_usd_tco2e"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
@@ -380,7 +380,6 @@ if file_risk and gdb_cargada:
             area_sp = area_total * v["relacion_area_sp_area_snc"]
             tasa_captura_ha = (p_borde * tasa_captura_borde) + ((1 - p_borde) * tasa_captura_nucleo)
             
-            # Sincronización con CAPEX y OPEX (incluyendo siembra y aislamiento)
             fac_aisla = 1.0 if v.get("relacion_area_aislamiento_area_snc", 1.0) == 0 else v.get("relacion_area_aislamiento_area_snc", 1.0)
             siembra = v.get("siembra_arboles", 0.0)
             
@@ -398,7 +397,6 @@ if file_risk and gdb_cargada:
             descuento = v["descuento_salvaguarda_tecnica"] + v["descuento_cambio_regulacion"] + v["descuento_variabilidad_climatica"]
             vol_creditos = area_total * tasa_captura_ha * v["eficiencia_snc"] * (1 - descuento)
             
-            # Precios de Mercado controlados globalmente
             precios = precio_carbono_input * (1 + v["incremento_precio_carbono"])**np.arange(1, anios + 1)
             ingresos = np.zeros(anios + 1)
             ingresos[1:] = vol_creditos * precios
@@ -407,12 +405,13 @@ if file_risk and gdb_cargada:
             flujos = np.where(flujos > 0, flujos * (1 - v["tasa_impuestos"]), flujos)
             flujos[0] = -capex_real
             
+            # En Monte Carlo original de R sí usaron ^(0:años)
             return calcular_npv(tasa_descuento, flujos)
 
         if st.button("🚀 Ejecutar Simulación Integral de Riesgo", type="primary"):
             with st.spinner('Procesando Simulación Monte Carlo y Escalabilidad...'):
                 
-                # Monte Carlo Blindado contra errores humanos en el Excel
+                # Monte Carlo Blindado
                 simulaciones = {}
                 for var in vars_simular:
                     try:
@@ -420,7 +419,6 @@ if file_risk and gdb_cargada:
                         v_mode = float(risk[var].iloc[1])
                         v_max = float(risk[var].iloc[2])
                         
-                        # Filtro de Seguridad Matemático
                         safe_min = min(v_min, v_max)
                         safe_max = max(v_min, v_max)
                         safe_mode = max(safe_min, min(v_mode, safe_max))
@@ -502,11 +500,3 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
-
-
-
-
-
-
-
-
