@@ -362,7 +362,7 @@ if gdb_cargada:
                 
                 st.success("Cálculo completado exitosamente.")
                 col_k1, col_k2, col_k3, col_k4 = st.columns(4)
-                col_k1.metric("VPN Trading + Comunidad", f"${vpn_total:,.0f}")
+                col_k1.metric("VPN (USD)", f"${vpn_total:,.0f}")
                 col_k2.metric("TIR Trading", f"{tir_trading*100:.2f}%")
                 col_k3.metric("Carbono Acreditable", f"{carbono_total:,.0f} tCO2e")
                 col_k4.metric("Costo Marginal (MAC)", f"${mac_usd:,.2f} /tCO2e")
@@ -594,3 +594,4 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
+
