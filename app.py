@@ -51,7 +51,7 @@ default_vars = {
     "Probable": [30100, "30%", "80%", "20%", "2%", "2%", 14.75, "6.57%", 100000, 600, 0, "25%", "10%", 5.3, 9.2, 0.6, "5%", 1800, "14%", "35%", "1.2%", 30, "35%", "12%", "105%"],
     "Alto": [181308, "40%", "90%", "30%", "3%", "3%", 16.95, "9.60%", 120000, 800, 0, "50%", "15%", 7, 12, 0.7, "7%", 2500, "20%", "40%", "1.5%", 40, "40%", "15%", "110%"]
 }
-default_vars["Analisis_Parametrico"] = default_vars["Analisis_Parametrico"].copy()
+default_vars["Analisis_Parametrico"] = default_vars["Probable"].copy()
 
 if 'df_risk' not in st.session_state:
     df_inicial = pd.DataFrame(default_vars)
@@ -186,7 +186,7 @@ if gdb_cargada:
         )
         
         if st.button("✅ Confirmar y Aplicar Variables", type="primary"):
-            df_edited["Analisis_Parametrico"] = df_edited["Analisis_Parametrico"]
+            df_edited["Analisis_Parametrico"] = df_edited["Probable"]
             st.session_state.df_risk = df_edited.copy()
             st.success("¡Variables guardadas con éxito! Los módulos 3, 4 y 5 están listos.")
 
