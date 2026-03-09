@@ -35,7 +35,7 @@ def parse_mixed_type(val):
     return float(val)
 
 # ==============================================================================
-# BASE DE DATOS DE VARIABLES POR DEFECTO (MIXTA: NÚMEROS Y PORCENTAJES)
+# 1. BASE DE DATOS DE VARIABLES POR DEFECTO 
 # ==============================================================================
 default_vars = {
     "Variables": [
@@ -50,23 +50,30 @@ default_vars = {
     ],
     "Bajo": [4000, "20%", "70%", "18%", "1%", "1%", 5, "4.97%", 80000, 150, 0, "20%", "5%", 4, 8, 0.5, "3%", 30, "10%", "30%", "1.0%", 20, "30%", "10%", "100%"],
     "Probable": [30100, "30%", "80%", "20%", "2%", "2%", 14.75, "6.57%", 100000, 600, 0, "25%", "10%", 5.3, 9.2, 0.6, "5%", 1800, "14%", "35%", "1.2%", 30, "35%", "12%", "105%"],
-    "Alto": [181308, "40%", "90%", "30%", "3%", "3%", 16.95, "9.60%", 120000, 800, 0, "50%", "15%", 7, 12, 0.7, "7%", 2500, "20%", "40%", "1.5%", 40, "40%", "15%", "110%"],
-    "Analisis_Parametrico": [30100, "30%", "85%", "20%", "2%", "2%", 14.75, "4.97%", 100000, 600, 0, "25%", "10%", 5.3, 9.2, 0.6, "5%", 1800, "14%", "35%", "1.2%", 30, "35%", "12%", "100%"]
+    "Alto": [181308, "40%", "90%", "30%", "3%", "3%", 16.95, "9.60%", 120000, 800, 0, "50%", "15%", 7, 12, 0.7, "7%", 2500, "20%", "40%", "1.5%", 40, "40%", "15%", "110%"]
 }
-df_default = pd.DataFrame(default_vars)
+# Regla estricta: Analisis_Parametrico siempre igual a Probable por defecto
+default_vars["Analisis_Parametrico"] = default_vars["Probable"].copy()
+
+# Guardamos en sesión para que los cambios se mantengan
+if 'df_risk' not in st.session_state:
+    df_inicial = pd.DataFrame(default_vars)
+    # Forzamos todo a string para que el editor de Streamlit permita mezclar números y porcentajes sin bloquearse
+    for col in ["Bajo", "Probable", "Alto", "Analisis_Parametrico"]:
+        df_inicial[col] = df_inicial[col].astype(str)
+    st.session_state.df_risk = df_inicial
 
 # ==============================================================================
-# BARRA LATERAL 
+# BARRA LATERAL LIMPIA
 # ==============================================================================
-st.sidebar.title("🌿 Gestión de Datos")
-st.sidebar.markdown("El modelo ya tiene datos cargados por defecto. Si deseas, puedes subir tu archivo Excel.")
-uploaded_file = st.sidebar.file_uploader("Cargar variables.xlsx (Opcional)", type=["xlsx"])
+st.sidebar.title("🌿 Análisis Integral SNC")
+st.sidebar.info("La plataforma opera de forma autónoma. Puedes modificar todas las variables de proyecto directamente en la **Pestaña 2**.")
 
 # Cargamos la GDB localmente
 try:
     df_GDB = pd.read_excel("GDB.xlsx")
     gdb_cargada = True
-    st.sidebar.success("Base maestra GDB conectada.")
+    st.sidebar.success("✅ Base maestra GDB conectada.")
 except Exception as e:
     st.error(f"Error al cargar GDB.xlsx: {e}")
     gdb_cargada = False
@@ -79,7 +86,7 @@ if gdb_cargada:
     st.title("Sistema de Modelado - Soluciones Naturales del Clima")
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 1. Incertidumbre MRV", 
-        "☁️ 2. Factor de Emisión", 
+        "☁️ 2. Factores y Variables", 
         "💵 3. Análisis Técnico", 
         "📈 4. Riesgos",
         "📉 5. Curvas MACC"
@@ -129,104 +136,102 @@ if gdb_cargada:
                 st.dataframe(df_eco, use_container_width=True, hide_index=True)
 
     # --------------------------------------------------------------------------
-    # TAB 2: FACTOR DE EMISIÓN + MATRIZ DE VARIABLES
+    # TAB 2: FACTORES DE EMISIÓN + MATRIZ DE VARIABLES
     # --------------------------------------------------------------------------
     with tab2:
-        # Usamos un contenedor para pintar la información arriba, aunque la tabla se declare abajo
-        c_emissions = st.container()
+        # PARTE 1: FACTORES DE EMISIÓN
+        st.subheader("🌲 Parámetros del Modelo de Carbono")
         
-        st.markdown("---")
-        st.subheader("📝 Matriz de Variables del Proyecto")
-        st.markdown("Modifica los valores aquí. Se aceptan porcentajes (ej. `20%`) y números fijos. Estos datos alimentan automáticamente los módulos financieros.")
+        df_valid = df_GDB.dropna(subset=['Valor'])
+        df_BT = df_valid[df_valid['Medida'].isin(['BA', 'BT'])] 
+        df_COS = df_valid[df_valid['Medida'] == 'COS']
         
-        # 1. Definir qué tabla mostrar (Subida o la Default)
-        if uploaded_file:
-            df_input = pd.read_excel(uploaded_file)
-        else:
-            df_input = df_default.copy()
+        def format_bt(idx): return f"{df_BT.loc[idx,'Ecosistema']} - {df_BT.loc[idx,'Estado']} | {df_BT.loc[idx,'Medida']}: {df_BT.loc[idx,'Valor']:.2f} tC/ha"
+        def format_cos(idx): return f"{df_COS.loc[idx,'Ecosistema']} - {df_COS.loc[idx,'Estado']} | {df_COS.loc[idx,'Medida']}: {df_COS.loc[idx,'Valor']:.2f} tC/ha"
+
+        col_b, col_n = st.columns(2)
+        with col_b:
+            st.markdown("### Sector Borde")
+            idx_bt_borde = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=0, key="bt_b")
+            idx_cos_borde = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=0, key="cos_b")
+            BT_borde_val = float(df_BT.loc[idx_bt_borde, 'Valor'])
+            COS_borde_val = float(df_COS.loc[idx_cos_borde, 'Valor'])
             
-        # 2. Renderizar el editor visual (el usuario interactúa con esta tabla)
-        df_edited = st.data_editor(df_input, use_container_width=True, hide_index=True, key="variables_editor")
+        with col_n:
+            st.markdown("### Sector Núcleo")
+            idx_def_bt = 1 if len(df_BT) > 1 else 0
+            idx_def_cos = 1 if len(df_COS) > 1 else 0
+            idx_bt_nucleo = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=idx_def_bt, key="bt_n")
+            idx_cos_nucleo = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=idx_def_cos, key="cos_n")
+            BT_nucleo_val = float(df_BT.loc[idx_bt_nucleo, 'Valor'])
+            COS_nucleo_val = float(df_COS.loc[idx_cos_nucleo, 'Valor'])
+
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        A1 = col_m1.number_input("Área Modelo 1 (A1)", value=25187.94)
+        A2 = col_m2.number_input("Área Modelo 2 (A2)", value=12292.83)
+        Mt1 = col_m3.number_input("Año Modelo 1 (Mt1)", value=2009)
+        Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
+
+        # Cálculo Temporal de Emisión
+        # (El área real se calculará en la matriz de variables para mantener sincronía)
+        BTe_borde = BT_borde_val * 0.47 * (44/12)
+        COSe_borde = (COS_borde_val / 20) * (44/12)
+        Fet_borde = (BTe_borde + COSe_borde) * 0.6
         
-        # 3. Traducción Matemática: Convertimos la tabla visual en la variable 'risk' numérica para Python
-        df_numeric = df_edited.copy()
+        BTe_nucleo = BT_nucleo_val * 0.47 * (44/12)
+        COSe_nucleo = (COS_nucleo_val / 20) * (44/12)
+        Fet_nucleo = (BTe_nucleo + COSe_nucleo) * 0.6
+        
+        # PARTE 2: MATRIZ DE VARIABLES INTEGRADA
+        st.markdown("---")
+        st.subheader("📝 Matriz de Variables de Riesgo")
+        st.markdown("Haz doble clic en cualquier celda para editar (puedes usar el símbolo `%`). Cuando termines, presiona el botón para guardar los cambios.")
+        
+        df_edited = st.data_editor(
+            st.session_state.df_risk, 
+            use_container_width=True, 
+            hide_index=True,
+            key="variables_editor"
+        )
+        
+        if st.button("✅ Confirmar y Aplicar Variables", type="primary"):
+            st.session_state.df_risk = df_edited.copy()
+            st.success("¡Variables guardadas con éxito! Los módulos 3, 4 y 5 han sido actualizados.")
+
+        # Procesamiento Matemático del DataFrame Guardado en Sesión
+        df_numeric = st.session_state.df_risk.copy()
         for col in ["Bajo", "Probable", "Alto", "Analisis_Parametrico"]:
-            if col in df_numeric.columns:
-                df_numeric[col] = df_numeric[col].apply(parse_mixed_type)
+            df_numeric[col] = df_numeric[col].apply(parse_mixed_type)
         
         df_numeric.set_index("Variables", inplace=True)
         df_numeric.index = df_numeric.index.str.strip().str.lower()
         risk = df_numeric.T
         risk.columns = risk.columns.str.strip().str.lower()
-        
-        # Variables de Control Globales extraídas del editor
+
+        # Extracción de variables paramétricas globales
         total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
         relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
         tasa_descuento = float(risk['tasa_descuento'].iloc[3])
         anios = int(risk['horizonte_tiempo_anios'].iloc[3])
-        precio_carbono_input = float(risk['precio_carbono_usd_tco2e'].iloc[3]) # Ahora controlado por la matriz
+        precio_carbono_input = float(risk['precio_carbono_usd_tco2e'].iloc[3])
         
-        # 4. Dibujar los Factores de Emisión en el contenedor superior
-        with c_emissions:
-            st.subheader("⚙️ Parámetros del Modelo de Carbono")
-            borde_calc = total_area_risk * relacion_borde_risk
-            nucleo_calc = total_area_risk - borde_calc
+        borde_calc = total_area_risk * relacion_borde_risk
+        nucleo_calc = total_area_risk - borde_calc
 
-            st.info(f"**Área Total:** {total_area_risk:,.2f} ha | **Área Borde ({relacion_borde_risk*100}%):** {borde_calc:,.2f} ha | **Área Núcleo:** {nucleo_calc:,.2f} ha")
+        # Terminar Cálculo de Factores
+        cambio_superficie_borde = abs(((1/(Mt2-Mt1)) * np.log(A2/A1)) * borde_calc)
+        CSV_borde = cambio_superficie_borde * (1 - 0.999)
+        Factor_borde = (Fet_borde * cambio_superficie_borde - Fet_borde * CSV_borde) / borde_calc
 
-            st.markdown("---")
-            df_valid = df_GDB.dropna(subset=['Valor'])
-            df_BT = df_valid[df_valid['Medida'].isin(['BA', 'BT'])] 
-            df_COS = df_valid[df_valid['Medida'] == 'COS']
-            
-            def format_bt(idx): return f"{df_BT.loc[idx,'Ecosistema']} - {df_BT.loc[idx,'Estado']} | {df_BT.loc[idx,'Medida']}: {df_BT.loc[idx,'Valor']:.2f} tC/ha"
-            def format_cos(idx): return f"{df_COS.loc[idx,'Ecosistema']} - {df_COS.loc[idx,'Estado']} | {df_COS.loc[idx,'Medida']}: {df_COS.loc[idx,'Valor']:.2f} tC/ha"
+        cambio_superficie_nucleo = abs(((1/(Mt2-Mt1)) * np.log(A2/A1)) * nucleo_calc)
+        CSV_nucleo = cambio_superficie_nucleo * (1 - 0.97)
+        Factor_nucleo = (Fet_nucleo * cambio_superficie_nucleo - Fet_nucleo * CSV_nucleo) / nucleo_calc
 
-            col_b, col_n = st.columns(2)
-            with col_b:
-                st.markdown("### Sector Borde")
-                idx_bt_borde = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=0, key="bt_b")
-                idx_cos_borde = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=0, key="cos_b")
-                BT_borde_val = float(df_BT.loc[idx_bt_borde, 'Valor'])
-                COS_borde_val = float(df_COS.loc[idx_cos_borde, 'Valor'])
-                
-            with col_n:
-                st.markdown("### Sector Núcleo")
-                idx_def_bt = 1 if len(df_BT) > 1 else 0
-                idx_def_cos = 1 if len(df_COS) > 1 else 0
-                idx_bt_nucleo = st.selectbox("Biomasa Total (BT/BA)", options=df_BT.index, format_func=format_bt, index=idx_def_bt, key="bt_n")
-                idx_cos_nucleo = st.selectbox("Carbono Orgánico Suelo (COS)", options=df_COS.index, format_func=format_cos, index=idx_def_cos, key="cos_n")
-                BT_nucleo_val = float(df_BT.loc[idx_bt_nucleo, 'Valor'])
-                COS_nucleo_val = float(df_COS.loc[idx_cos_nucleo, 'Valor'])
-
-            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            A1 = col_m1.number_input("Área Modelo 1 (A1)", value=25187.94)
-            A2 = col_m2.number_input("Área Modelo 2 (A2)", value=12292.83)
-            Mt1 = col_m3.number_input("Año Modelo 1 (Mt1)", value=2009)
-            Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
-
-            BTe_borde = BT_borde_val * 0.47 * (44/12)
-            COSe_borde = (COS_borde_val / 20) * (44/12)
-            Fet_borde = (BTe_borde + COSe_borde) * 0.6
-            cambio_superficie_borde = abs(((1/(Mt2-Mt1)) * np.log(A2/A1)) * borde_calc)
-            CSV_borde = cambio_superficie_borde * (1 - 0.999)
-            EAlb_borde = Fet_borde * cambio_superficie_borde
-            EAp_borde = Fet_borde * CSV_borde
-            Factor_borde = (EAlb_borde - EAp_borde) / borde_calc
-
-            BTe_nucleo = BT_nucleo_val * 0.47 * (44/12)
-            COSe_nucleo = (COS_nucleo_val / 20) * (44/12)
-            Fet_nucleo = (BTe_nucleo + COSe_nucleo) * 0.6
-            cambio_superficie_nucleo = abs(((1/(Mt2-Mt1)) * np.log(A2/A1)) * nucleo_calc)
-            CSV_nucleo = cambio_superficie_nucleo * (1 - 0.97)
-            EAlb_nucleo = Fet_nucleo * cambio_superficie_nucleo
-            EAp_nucleo = Fet_nucleo * CSV_nucleo
-            Factor_nucleo = (EAlb_nucleo - EAp_nucleo) / nucleo_calc
-
-            st.subheader("✅ Factores de Emisión Finales")
-            c_res1, c_res2 = st.columns(2)
-            c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha-año")
-            c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha-año")
+        st.subheader("✅ Factores de Emisión Finales")
+        c_res1, c_res2, c_res3 = st.columns(3)
+        c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha-año")
+        c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha-año")
+        c_res3.metric("Área Total Paramétrica", f"{total_area_risk:,.0f} ha")
 
     # --------------------------------------------------------------------------
     # TAB 3: ANÁLISIS TÉCNICO ECONÓMICO (FLUJO DE CAJA)
@@ -236,10 +241,10 @@ if gdb_cargada:
         
         c_t1, c_t2 = st.columns(2)
         anio_inicio = c_t1.number_input("Año de Inicio", value=2027, step=1)
-        proyeccion = c_t2.number_input("Años de Proyección", value=anios, step=1) # Heredado de la matriz
+        proyeccion = c_t2.number_input("Años de Proyección", value=anios, step=1)
         
         if st.button("Generar Flujo de Caja", type="primary"):
-            with st.spinner("Sincronizando flujos con R..."):
+            with st.spinner("Construyendo proyecciones financieras..."):
                 anios_arr = np.arange(anio_inicio, anio_inicio + proyeccion + 1)
                 df_tec = pd.DataFrame({'Proyecciones': anios_arr})
                 
@@ -380,7 +385,7 @@ if gdb_cargada:
             st.markdown("---")
             st.subheader("💾 Guardar este Escenario para la Curva MACC")
             c_name, c_btn = st.columns([3, 1])
-            escenario_name = c_name.text_input("Nombre del Proyecto / Escenario:", value=f"Escenario Modificado {len(st.session_state.macc_data)+1}")
+            escenario_name = c_name.text_input("Nombre del Proyecto / Escenario:", value=f"Proyecto {len(st.session_state.macc_data)+1}")
             
             if c_btn.button("➕ Añadir a Curva MACC", type="secondary"):
                 st.session_state.macc_data.append({
@@ -544,7 +549,7 @@ if gdb_cargada:
     # --------------------------------------------------------------------------
     with tab5:
         st.subheader("📉 Curva de Costos Marginales de Abatimiento (MACC)")
-        st.markdown("Genera flujos en la **Pestaña 3** modificando las variables, y añádelos aquí para comparar escenarios.")
+        st.markdown("Genera flujos en la **Pestaña 3** modificando las variables en la **Pestaña 2**, y añádelos aquí para comparar escenarios.")
         
         if not st.session_state.macc_data:
             st.info("💡 Tu portafolio está vacío. Ve a la Pestaña 3 y guarda un escenario.")
@@ -575,7 +580,6 @@ if gdb_cargada:
                 bargap=0,
                 height=600
             )
-            
             st.plotly_chart(fig_macc, use_container_width=True)
 
             st.subheader("📋 Resumen del Portafolio")
