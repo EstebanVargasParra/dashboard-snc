@@ -415,6 +415,7 @@ if gdb_cargada:
         
         st.markdown("---")
         
+        # ⚠️ Incluimos el Precio del Carbono en la simulación de riesgo (Lognormal)
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
@@ -437,7 +438,6 @@ if gdb_cargada:
             emisiones = (acum_borde * Factor_borde + acum_nucleo * Factor_nucleo) * v["eficiencia_snc"]
             salvaguarda = emisiones * v["descuento_salvaguarda_tecnica"]
             camb_reg = emisiones * v["descuento_cambio_regulacion"]
-            # Extraemos la variable desde v_param para garantizar consistencia si no está en la simulación
             var_clim = emisiones * v.get("descuento_variabilidad_climatica", float(v_param['descuento_variabilidad_climatica']))
             carbono_neto = emisiones - salvaguarda - camb_reg - var_clim
             
@@ -485,7 +485,6 @@ if gdb_cargada:
             egresos_opex = opex_mant + costo_salv + costo_mon + imprevistos + costo_trans + opex_sp_arr
             egresos_opex[0] = 0.0
             
-            # Usando v_param para los datos extraídos
             ingresos_sp = np.zeros(proyeccion + 1)
             if proyeccion >= 1: ingresos_sp[1] = capex_sp[0] * v.get("ingreso_sp", float(v_param['ingreso_sp']))
             crec_sp = v.get("crecimiento_sp", float(v_param['crecimiento_sp']))
@@ -516,8 +515,8 @@ if gdb_cargada:
                 for var in vars_simular:
                     try:
                         v_min = float(risk[var].loc['bajo'])
-                        # EL AJUSTE FINAL: El valor modal del Monte Carlo ahora es Analisis_Parametrico
-                        v_mode = float(risk[var].loc['analisis_parametrico'])
+                        # EL AJUSTE FINAL: El valor modal del Monte Carlo vuelve a ser 'probable'
+                        v_mode = float(risk[var].loc['probable'])
                         v_max = float(risk[var].loc['alto'])
                         
                         safe_min = min(v_min, v_max)
@@ -575,8 +574,6 @@ if gdb_cargada:
                     k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (total_area_risk - area_inflexion)
                 except:
                     k_steepness = 0.0005 
-
-                def factor_sigmoidal(area): return mult_min + (mult_max - mult_min) / (1 + np.exp(k_steepness * (area - area_inflexion)))
 
                 v_base = risk.loc['analisis_parametrico'].to_dict()
                 areas_simuladas = np.arange(area_minima, area_maxima + intervalo_sim, intervalo_sim)
@@ -665,4 +662,5 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
+
 
