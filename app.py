@@ -205,29 +205,35 @@ if file_risk and gdb_cargada:
                 anios_arr = np.arange(anio_inicio, anio_inicio + proyeccion + 1)
                 df_tec = pd.DataFrame({'Proyecciones': anios_arr})
                 
-                # 1. Áreas
+                # 1. Áreas (Sincronización exacta con R)
                 df_tec['area_borde_proyecto_ha'] = 0.0
                 df_tec['area_nucleo_proyecto_ha'] = 0.0
-                if proyeccion >= 2:
-                    df_tec.loc[1:2, 'area_borde_proyecto_ha'] = total_area_risk * relacion_borde_risk / 2
-                    df_tec.loc[1:2, 'area_nucleo_proyecto_ha'] = total_area_risk * (1 - relacion_borde_risk) / 2
+                
+                area_borde_calc = total_area_risk * relacion_borde_risk / 2
+                area_nucleo_calc = total_area_risk * (1 - relacion_borde_risk) / 2
+                
+                mask_años = df_tec['Proyecciones'].isin([anio_inicio + 1, anio_inicio + 2])
+                df_tec.loc[mask_años, 'area_borde_proyecto_ha'] = area_borde_calc
+                df_tec.loc[mask_años, 'area_nucleo_proyecto_ha'] = area_nucleo_calc
                 
                 df_tec['area_acumulada_borde_anual_ha'] = df_tec['area_borde_proyecto_ha'].cumsum()
-                df_tec.loc[0, 'area_acumulada_borde_anual_ha'] = 0.0
                 df_tec['area_acumulada_nucleo_anual_ha'] = df_tec['area_nucleo_proyecto_ha'].cumsum()
-                df_tec.loc[0, 'area_acumulada_nucleo_anual_ha'] = 0.0
                 
-                # 2. Carbono
+                # Reset para el año base (Año 0) igual al ifelse en R
+                df_tec.loc[df_tec['Proyecciones'] < anio_inicio + 1, ['area_acumulada_borde_anual_ha', 'area_acumulada_nucleo_anual_ha']] = 0.0
+                
+                # 2. Carbono (variabilidad climática igual a cambio regulación, como en R)
                 df_tec['emisiones_evitas_eficiencia_tco2e'] = (df_tec['area_acumulada_borde_anual_ha']*Factor_borde + df_tec['area_acumulada_nucleo_anual_ha']*Factor_nucleo) * float(risk['eficiencia_snc'].iloc[3])
                 df_tec['salvaguarda_tecnica_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_salvaguarda_tecnica'].iloc[3])
                 df_tec['cambio_regulacion_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_cambio_regulacion'].iloc[3])
                 df_tec['variabilidad_climatica_tco2e'] = df_tec['cambio_regulacion_tco2e']
+                
                 df_tec['carbono_acreditable_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] - df_tec['salvaguarda_tecnica_tco2e'] - df_tec['cambio_regulacion_tco2e'] - df_tec['variabilidad_climatica_tco2e']
                 
-                # 3. Precios (MERCADO MANUAL)
+                # 3. Precios (MERCADO MANUAL - Ajuste de vector para R)
                 precios = precio_carbono_input * (1 + float(risk['incremento_precio_carbono'].iloc[3]))**np.arange(0, proyeccion + 1)
                 df_tec['precio_carbono_trading_usd_tco2e'] = 0.0
-                df_tec.loc[1:, 'precio_carbono_trading_usd_tco2e'] = precios[:-1] 
+                df_tec.loc[df_tec['Proyecciones'] >= anio_inicio + 1, 'precio_carbono_trading_usd_tco2e'] = precios[:proyeccion]
                 df_tec['precio_carbono_ecp_usd_tco2e'] = df_tec['precio_carbono_trading_usd_tco2e']
                 
                 # 4. CAPEX (Aislamiento y Siembra)
@@ -308,7 +314,7 @@ if file_risk and gdb_cargada:
                 vpn_comunidad_usd = calcular_npv(tasa_descuento, flujos_comunidad)
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
                 
-                # TIR controlada por si hay errores de matemáticas puras
+                # TIR con exclusión del último año (Espejo exacto de tu FinCal::irr en R)
                 try:
                     tir_trading = npf.irr(flujos_trading[:-1]) if len(flujos_trading) > 1 else np.nan
                     if np.isnan(tir_trading): tir_trading = 0.0
@@ -496,6 +502,7 @@ if file_risk and gdb_cargada:
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
 
 
 
