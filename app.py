@@ -3,16 +3,26 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 import plotly.express as px
+import plotly.graph_objects as go
 import io
 import numpy_financial as npf
 
 # ==============================================================================
-# CONFIGURACIÓN DE LA PÁGINA
+# CONFIGURACIÓN Y MEMORIA DE SESIÓN
 # ==============================================================================
 st.set_page_config(page_title="Dashboard Integral SNC", layout="wide", page_icon="🌿")
 
+# Inicializar variables en memoria para la Curva MACC
+if 'macc_data' not in st.session_state:
+    st.session_state.macc_data = []
+if 'last_computed' not in st.session_state:
+    st.session_state.last_computed = False
+if 'last_mac' not in st.session_state:
+    st.session_state.last_mac = 0.0
+if 'last_vol' not in st.session_state:
+    st.session_state.last_vol = 0.0
+
 def calcular_npv(rate, cashflows):
-    # Función para Monte Carlo (Año 0 a Año 30)
     return sum([cf / (1 + rate)**i for i, cf in enumerate(cashflows)])
 
 # ==============================================================================
@@ -42,12 +52,10 @@ if file_risk and gdb_cargada:
     # 1. Procesamiento Blindado de variables.xlsx
     df_risk_raw = pd.read_excel(file_risk, index_col=0)
     
-    # Limpieza extrema: minúsculas y sin espacios
     df_risk_raw.index = df_risk_raw.index.str.strip().str.lower()
     risk = df_risk_raw.T
     risk.columns = risk.columns.str.strip().str.lower()
     
-    # Parámetros Fijos
     try:
         total_area_risk = float(risk['area_total_proyecto_ha'].iloc[3])
         relacion_borde_risk = float(risk['relacion_area_efecto_borde'].iloc[3])
@@ -60,23 +68,20 @@ if file_risk and gdb_cargada:
     st.sidebar.markdown("---")
     st.sidebar.subheader("💰 Variable de Mercado")
     precio_carbono_excel = float(risk['precio_carbono_usd_tco2e'].iloc[1])
-    precio_carbono_input = st.sidebar.number_input(
-        "Precio del Carbono (USD/tCO2e)", 
-        value=precio_carbono_excel, 
-        step=0.5,
-        help="Este valor se hereda de tu archivo 'variables.xlsx'. Puedes borrarlo y escribir otro para simular."
-    )
+    precio_carbono_input = st.sidebar.number_input("Precio del Carbono (USD/tCO2e)", value=precio_carbono_excel, step=0.5, help="Heredado de variables.xlsx. Puedes cambiarlo.")
+    
     if precio_carbono_input != precio_carbono_excel:
-        st.sidebar.warning(f"⚠️ Estás usando un precio modificado. Valor original en Excel: **${precio_carbono_excel}**")
-    else:
-        st.sidebar.caption("💡 *Precio heredado de la base de datos.*")
-        
+        st.sidebar.warning(f"⚠️ Estás usando un precio modificado. Valor original: **${precio_carbono_excel}**")
+
     st.title("Sistema de Modelado - Soluciones Naturales del Clima")
-    tab1, tab2, tab3, tab4 = st.tabs([
+    
+    # ⚠️ SE AÑADE LA PESTAÑA 5 PARA MACC
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 1. Incertidumbre MRV", 
         "☁️ 2. Factor de Emisión", 
-        "💵 3. Análisis Técnico Económico", 
-        "📈 4. Riesgos y Escalabilidad"
+        "💵 3. Análisis Técnico", 
+        "📈 4. Riesgos",
+        "📉 5. Curvas MACC"
     ])
 
     # --------------------------------------------------------------------------
@@ -175,7 +180,6 @@ if file_risk and gdb_cargada:
         Mt1 = col_m3.number_input("Año Modelo 1 (Mt1)", value=2009)
         Mt2 = col_m4.number_input("Año Modelo 2 (Mt2)", value=2018)
 
-        # Cálculos de Emisión
         BTe_borde = BT_borde_val * 0.47 * (44/12)
         COSe_borde = (COS_borde_val / 20) * (44/12)
         Fet_borde = (BTe_borde + COSe_borde) * 0.6
@@ -210,28 +214,22 @@ if file_risk and gdb_cargada:
         proyeccion = c_t2.number_input("Años de Proyección", value=30, step=1)
         
         if st.button("Generar Flujo de Caja", type="primary"):
-            with st.spinner("Sincronizando flujos con R..."):
+            with st.spinner("Calculando modelo..."):
                 anios_arr = np.arange(anio_inicio, anio_inicio + proyeccion + 1)
                 df_tec = pd.DataFrame({'Proyecciones': anios_arr})
                 
-                # 1. Áreas (Sincronización exacta con R)
                 df_tec['area_borde_proyecto_ha'] = 0.0
                 df_tec['area_nucleo_proyecto_ha'] = 0.0
-                
                 area_borde_calc = total_area_risk * relacion_borde_risk / 2
                 area_nucleo_calc = total_area_risk * (1 - relacion_borde_risk) / 2
-                
-                # En R: [anio_inicio+1, anio_inicio+2] que son Índices 1 y 2 en Python
                 mask_años = df_tec['Proyecciones'].isin([anio_inicio + 1, anio_inicio + 2])
                 df_tec.loc[mask_años, 'area_borde_proyecto_ha'] = area_borde_calc
                 df_tec.loc[mask_años, 'area_nucleo_proyecto_ha'] = area_nucleo_calc
                 
                 df_tec['area_acumulada_borde_anual_ha'] = df_tec['area_borde_proyecto_ha'].cumsum()
                 df_tec['area_acumulada_nucleo_anual_ha'] = df_tec['area_nucleo_proyecto_ha'].cumsum()
-                # Reset para el año base (Año 0) igual al ifelse en R
                 df_tec.loc[df_tec['Proyecciones'] < anio_inicio + 1, ['area_acumulada_borde_anual_ha', 'area_acumulada_nucleo_anual_ha']] = 0.0
                 
-                # 2. Carbono
                 df_tec['emisiones_evitas_eficiencia_tco2e'] = (df_tec['area_acumulada_borde_anual_ha']*Factor_borde + df_tec['area_acumulada_nucleo_anual_ha']*Factor_nucleo) * float(risk['eficiencia_snc'].iloc[3])
                 df_tec['salvaguarda_tecnica_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_salvaguarda_tecnica'].iloc[3])
                 df_tec['cambio_regulacion_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(risk['descuento_cambio_regulacion'].iloc[3])
@@ -239,13 +237,11 @@ if file_risk and gdb_cargada:
                 
                 df_tec['carbono_acreditable_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] - df_tec['salvaguarda_tecnica_tco2e'] - df_tec['cambio_regulacion_tco2e'] - df_tec['variabilidad_climatica_tco2e']
                 
-                # 3. Precios (Desfase de índice arreglado para coincidir con R)
                 precios = precio_carbono_input * (1 + float(risk['incremento_precio_carbono'].iloc[3]))**np.arange(0, proyeccion + 1)
                 df_tec['precio_carbono_trading_usd_tco2e'] = 0.0
                 df_tec.loc[df_tec['Proyecciones'] >= anio_inicio + 1, 'precio_carbono_trading_usd_tco2e'] = precios[:proyeccion]
                 df_tec['precio_carbono_ecp_usd_tco2e'] = df_tec['precio_carbono_trading_usd_tco2e']
                 
-                # 4. CAPEX (Aislamiento y Siembra - Índices 0 y 1 arreglados)
                 df_tec['capex_estudios_snc_usd'] = 0.0
                 df_tec.loc[0, 'capex_estudios_snc_usd'] = float(risk['capex_estudios_habilitantes_snc_usd'].iloc[3])
                 
@@ -255,7 +251,6 @@ if file_risk and gdb_cargada:
                     df_tec.loc[0, 'capex_conservacion_snc_usd'] = df_tec.loc[1, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
                     df_tec.loc[1, 'capex_conservacion_snc_usd'] = df_tec.loc[2, 'area_borde_proyecto_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * fac_aisla + float(risk['siembra_arboles'].iloc[3])
                 
-                # 5. OPEX SNC
                 df_tec['opex_mantenimiento_snc_usd'] = 0.0
                 if proyeccion >= 2:
                     df_tec.loc[1:2, 'opex_mantenimiento_snc_usd'] = df_tec.loc[1:2, 'area_acumulada_borde_anual_ha'] * float(risk['capex_snc_usd_ha'].iloc[3]) * float(risk['operación_relacion_capex_snc'].iloc[3]) * fac_aisla
@@ -277,7 +272,6 @@ if file_risk and gdb_cargada:
                 trans_years = np.arange(anio_inicio + 2, anio_inicio + proyeccion + 1, 3)
                 df_tec.loc[df_tec['Proyecciones'].isin(trans_years), 'costo_transaccion_usd'] = costo_trans_base
                 
-                # 6. Sistema Productivo (SP)
                 fac_aisla_sp = 1.0 if float(risk['relacion_area_sp_area_snc'].iloc[3]) == 0 else float(risk['relacion_area_sp_area_snc'].iloc[3])
                 df_tec['capex_sistema_productivo_usd'] = 0.0
                 df_tec.loc[0, 'capex_sistema_productivo_usd'] = total_area_risk * float(risk['capex_sp_usd_ha'].iloc[3]) * fac_aisla_sp
@@ -286,7 +280,6 @@ if file_risk and gdb_cargada:
                 if proyeccion >= 10:
                     df_tec.loc[1:10, 'opex_mantenimiento_sp_usd'] = df_tec.loc[0, 'capex_sistema_productivo_usd'] * float(risk['opex_sp'].iloc[3])
                 
-                # 7. Totales OPEX e Ingresos
                 cols_opex = ['opex_mantenimiento_snc_usd', 'costo_salvaguarda_snc_usd_anio', 'costo_monitoreo_snc_usd', 'imprevistos_snc_usd', 'costo_transaccion_usd', 'capex_sistema_productivo_usd', 'opex_mantenimiento_sp_usd']
                 df_tec['egresos_opex_totales_usd'] = df_tec[cols_opex].sum(axis=1)
                 df_tec.loc[0, 'egresos_opex_totales_usd'] = 0.0
@@ -300,7 +293,6 @@ if file_risk and gdb_cargada:
                 
                 df_tec['ebitda_trading_usd'] = df_tec['ingresos_carbono_trading_usd'] - df_tec['egresos_opex_totales_usd']
                 
-                # 8. Depreciación y Financieros (Desfase de índices arreglado)
                 df_tec['depreciacion_trading_usd'] = 0.0
                 if proyeccion >= 1: df_tec.loc[1, 'depreciacion_trading_usd'] = (df_tec.loc[0, 'capex_sistema_productivo_usd']/10) + (df_tec.loc[0, 'capex_conservacion_snc_usd']/20)
                 if proyeccion >= 10: df_tec.loc[2:10, 'depreciacion_trading_usd'] = df_tec.loc[1, 'depreciacion_trading_usd'] + (df_tec.loc[1, 'capex_conservacion_snc_usd']/20)
@@ -316,11 +308,9 @@ if file_risk and gdb_cargada:
                 df_tec['impuestos_comunidad_usd'] = df_tec['ingresos_sp_usd'] * float(risk['tasa_impuestos'].iloc[3])
                 df_tec['utilidad_neta_comunidad_usd'] = df_tec['ingresos_sp_usd'] - df_tec['impuestos_comunidad_usd']
                 
-                # 9. Cálculo de VPN, TIR y MAC (MATEMÁTICA EXACTA A R)
                 flujos_trading = df_tec['flujo_caja_libre_trading_usd'].values
                 flujos_comunidad = df_tec['impuestos_comunidad_usd'].values
                 
-                # Aplicamos el exponente (i + 1) para que el año 2027 inicie con exponente ^1 como en R
                 vpn_precio_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_trading)])
                 vpn_comunidad_usd = sum([cf / (1 + tasa_descuento)**(i + 1) for i, cf in enumerate(flujos_comunidad[1:])])
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
@@ -334,7 +324,11 @@ if file_risk and gdb_cargada:
                 carbono_total = df_tec['carbono_acreditable_tco2e'].sum()
                 mac_usd = -(vpn_total / carbono_total) if carbono_total > 0 else np.nan
                 
-                # 10. Resultados Visuales
+                # GUARDAMOS RESULTADOS EN MEMORIA PARA LA MACC
+                st.session_state.last_mac = mac_usd
+                st.session_state.last_vol = carbono_total
+                st.session_state.last_computed = True
+                
                 st.success("Cálculo completado exitosamente.")
                 col_k1, col_k2, col_k3, col_k4 = st.columns(4)
                 col_k1.metric("VPN Trading + Comunidad", f"${vpn_total:,.0f}")
@@ -343,17 +337,26 @@ if file_risk and gdb_cargada:
                 col_k4.metric("Costo Marginal (MAC)", f"${mac_usd:,.2f} /tCO2e")
                 
                 fig_fcl = px.bar(df_tec, x='Proyecciones', y='flujo_caja_libre_trading_usd', 
-                                 title="Flujo de Caja Libre (Trading) por Año",
-                                 labels={'flujo_caja_libre_trading_usd': 'Flujo (USD)'})
+                                 title="Flujo de Caja Libre (Trading) por Año", labels={'flujo_caja_libre_trading_usd': 'Flujo (USD)'})
                 fig_fcl.update_traces(marker_color=np.where(df_tec["flujo_caja_libre_trading_usd"]<0, 'red', 'green'))
                 st.plotly_chart(fig_fcl, use_container_width=True)
                 
-                with st.expander("Ver Tabla Detallada (Flujo de Caja)"):
-                    st.dataframe(df_tec.style.format(precision=2), use_container_width=True)
-                    
-                buf_flujo = io.BytesIO()
-                df_tec.to_excel(buf_flujo, index=False)
-                st.download_button("📥 Descargar Análisis Técnico (.xlsx)", buf_flujo.getvalue(), "Analisis_Tecnico.xlsx")
+        # --- LÓGICA DE GUARDADO AL PORTAFOLIO MACC ---
+        if st.session_state.last_computed:
+            st.markdown("---")
+            st.subheader("💾 Guardar este Escenario para la Curva MACC")
+            st.markdown("Si estás satisfecho con este flujo, dale un nombre y guárdalo para construir tu portafolio.")
+            
+            c_name, c_btn = st.columns([3, 1])
+            escenario_name = c_name.text_input("Nombre del Proyecto / Escenario:", value=f"Proyecto {len(st.session_state.macc_data)+1}")
+            
+            if c_btn.button("➕ Añadir a Curva MACC", type="secondary"):
+                st.session_state.macc_data.append({
+                    "Proyecto": escenario_name,
+                    "MAC (USD/tCO2e)": st.session_state.last_mac,
+                    "Volumen (tCO2e)": st.session_state.last_vol
+                })
+                st.success(f"✅ ¡'{escenario_name}' añadido! Ve a la pestaña 5 para ver la curva consolidada.")
 
     # --------------------------------------------------------------------------
     # TAB 4: RIESGOS Y ESCALABILIDAD
@@ -414,28 +417,21 @@ if file_risk and gdb_cargada:
             flujos = np.where(flujos > 0, flujos * (1 - v["tasa_impuestos"]), flujos)
             flujos[0] = -capex_real
             
-            # En Monte Carlo original de R sí usaron ^(0:años)
             return calcular_npv(tasa_descuento, flujos)
 
         if st.button("🚀 Ejecutar Simulación Integral de Riesgo", type="primary"):
             with st.spinner('Procesando Simulación Monte Carlo y Escalabilidad...'):
-                
-                # Monte Carlo Blindado
                 simulaciones = {}
                 for var in vars_simular:
                     try:
                         v_min = float(risk[var].iloc[0])
                         v_mode = float(risk[var].iloc[1])
                         v_max = float(risk[var].iloc[2])
-                        
                         safe_min = min(v_min, v_max)
                         safe_max = max(v_min, v_max)
                         safe_mode = max(safe_min, min(v_mode, safe_max))
-                        
-                        if safe_min == safe_max:
-                            simulaciones[var] = np.full(10000, safe_min)
-                        else:
-                            simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
+                        if safe_min == safe_max: simulaciones[var] = np.full(10000, safe_min)
+                        else: simulaciones[var] = np.random.triangular(safe_min, safe_mode, safe_max, 10000)
                     except Exception as e:
                         st.error(f"Error procesando variable '{var}': {e}")
                         st.stop()
@@ -445,28 +441,22 @@ if file_risk and gdb_cargada:
                 df_sim['VPN'] = vpn_resultados
                 
                 st.subheader("📊 3. Análisis de Riesgo Financiero")
-                
                 fig_hist = px.histogram(df_sim, x="VPN", nbins=50, title="Distribución de la VPN", color_discrete_sequence=['lightgray'])
                 fig_hist.update_traces(marker_line_color='white', marker_line_width=1)
                 p10, p50, p90 = np.percentile(vpn_resultados, [10, 50, 90])
                 fig_hist.add_vline(x=p10, line_dash="dash", line_color="red", annotation_text=f"P10: ${p10:,.0f}")
                 fig_hist.add_vline(x=p50, line_width=2, line_color="green", annotation_text=f"P50: ${p50:,.0f}")
                 fig_hist.add_vline(x=p90, line_dash="dash", line_color="blue", annotation_text=f"P90: ${p90:,.0f}")
-                fig_hist.update_layout(height=500)
                 st.plotly_chart(fig_hist, use_container_width=True)
 
                 correlaciones = {var: stats.spearmanr(df_sim[var], df_sim['VPN'])[0] for var in vars_simular if df_sim[var].std() > 0}
                 df_corr = pd.DataFrame(list(correlaciones.items()), columns=['Variable', 'Correlacion']).sort_values('Correlacion')
-                fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', title="Sensibilidad de Monte Carlo (Spearman)", color='Correlacion', color_continuous_scale="RdYlGn")
-                fig_tornado.update_layout(height=600)
+                fig_tornado = px.bar(df_corr, x='Correlacion', y='Variable', orientation='h', title="Sensibilidad (Spearman)", color='Correlacion', color_continuous_scale="RdYlGn")
                 st.plotly_chart(fig_tornado, use_container_width=True)
 
-                # Escalabilidad
                 st.subheader("⚖️ 4. Análisis de Punto de Equilibrio (Curva S)")
-                try:
-                    k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (total_area_risk - area_inflexion)
-                except:
-                    k_steepness = 0.0005 
+                try: k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (total_area_risk - area_inflexion)
+                except: k_steepness = 0.0005 
 
                 def factor_sigmoidal(area): return mult_min + (mult_max - mult_min) / (1 + np.exp(k_steepness * (area - area_inflexion)))
 
@@ -478,35 +468,78 @@ if file_risk and gdb_cargada:
                     v_actual = v_base.copy()
                     v_actual["area_total_proyecto_ha"] = ha
                     f_escala = factor_sigmoidal(ha)
-                    
                     v_actual["monitoreo_snc_usd_ha_anio"] *= f_escala
                     v_actual["capex_snc_usd_ha"] *= f_escala
                     v_actual["factor_salvaguarda_snc_usd_ha_anio"] *= f_escala
                     v_actual["capex_sp_usd_ha"] *= f_escala
-                    
                     resultados_escala.append({"Hectareas": ha, "VPN": calcular_vpn_iter(v_actual), "Factor_Costo": f_escala})
                     
                 df_esc = pd.DataFrame(resultados_escala)
-                
                 df_eq = df_esc[df_esc['VPN'] >= 0]
                 pto_eq = df_eq.iloc[0]['Hectareas'] if not df_eq.empty else None
-                if pto_eq: st.success(f"✅ **Equilibrio SIGMOIDAL alcanzado a las {pto_eq:,.0f} Hectáreas**")
-                else: st.error("❌ El proyecto no logra punto de equilibrio.")
-                    
+                
                 fig_vpn = px.line(df_esc, x="Hectareas", y="VPN", title="Evolución de VPN vs Área")
                 fig_vpn.add_hline(y=0, line_dash="dash", line_color="red", line_width=2)
                 if pto_eq: fig_vpn.add_vline(x=pto_eq, line_dash="dot", line_color="green", line_width=2, annotation_text=f"Break-even: {pto_eq:,.0f} ha")
-                fig_vpn.update_layout(height=500)
                 st.plotly_chart(fig_vpn, use_container_width=True)
-                    
-                fig_factor = px.line(df_esc, x="Hectareas", y="Factor_Costo", title="Factor de Costo (Curva Sigmoidal)")
-                fig_factor.update_traces(line_color="darkorange", line_width=3)
-                fig_factor.add_hline(y=eficiencia_base, line_dash="dot", line_color="blue", annotation_text=f"Base ({eficiencia_base})")
-                fig_factor.add_hline(y=mult_max, line_dash="dash", line_color="gray")
-                fig_factor.add_hline(y=mult_min, line_dash="dash", line_color="gray", annotation_text="Límite Operativo")
-                fig_factor.update_layout(height=500)
-                st.plotly_chart(fig_factor, use_container_width=True)
+
+    # --------------------------------------------------------------------------
+    # TAB 5: CURVAS MACC (NUEVO)
+    # --------------------------------------------------------------------------
+    with tab5:
+        st.subheader("📉 Curva de Costos Marginales de Abatimiento (MACC)")
+        st.markdown("Esta curva consolida los proyectos que has guardado desde la **Pestaña 3** para formar un portafolio de mitigación climática.")
+        
+        if not st.session_state.macc_data:
+            st.info("💡 Tu portafolio está vacío. Ve a la **Pestaña 3**, calcula un Flujo de Caja y presiona el botón 'Añadir a Curva MACC'.")
+        else:
+            # 1. Preparar datos
+            df_macc = pd.DataFrame(st.session_state.macc_data)
+            # Ordenamos por Costo Marginal (de más barato a más caro)
+            df_macc = df_macc.sort_values(by="MAC (USD/tCO2e)").reset_index(drop=True)
+
+            # 2. Matemática de la gráfica escalonada (MACC)
+            # El centro de la barra X es la suma acumulada menos la mitad del ancho de la barra actual
+            df_macc['Volumen Acumulado'] = df_macc['Volumen (tCO2e)'].cumsum()
+            df_macc['x_pos'] = df_macc['Volumen Acumulado'] - (df_macc['Volumen (tCO2e)'] / 2)
+
+            # Colores: Verde si MAC < 0 (ahorro), Naranja 0-20, Rojo > 20
+            colores = np.where(df_macc['MAC (USD/tCO2e)'] < 0, '#2ecc71', 
+                               np.where(df_macc['MAC (USD/tCO2e)'] <= 20, '#f39c12', '#e74c3c'))
+
+            # 3. Dibujar la Gráfica
+            fig_macc = go.Figure()
+            fig_macc.add_trace(go.Bar(
+                x=df_macc['x_pos'],
+                y=df_macc['MAC (USD/tCO2e)'],
+                width=df_macc['Volumen (tCO2e)'],
+                text=df_macc['Proyecto'],
+                marker_color=colores,
+                hovertemplate="<b>%{text}</b><br>Costo Marginal: $%{y:.2f} / tCO2e<br>Volumen Acreditable: %{width:,.0f} tCO2e<extra></extra>"
+            ))
+
+            fig_macc.update_layout(
+                title="Curva MACC del Portafolio Climático",
+                xaxis_title="Abatimiento Acumulado (tCO2e)",
+                yaxis_title="Costo Marginal (USD / tCO2e)",
+                bargap=0,
+                height=600
+            )
+            st.plotly_chart(fig_macc, use_container_width=True)
+
+            # 4. Tabla de Resumen
+            st.subheader("📋 Resumen del Portafolio")
+            st.dataframe(df_macc[['Proyecto', 'MAC (USD/tCO2e)', 'Volumen (tCO2e)']].style.format({
+                "MAC (USD/tCO2e)": "${:.2f}",
+                "Volumen (tCO2e)": "{:,.0f}"
+            }), use_container_width=True)
+
+            # 5. Botón de limpieza
+            if st.button("🗑️ Vaciar Portafolio", type="secondary"):
+                st.session_state.macc_data = []
+                st.rerun()
 
 else:
     st.info("👈 Por favor, carga tu archivo 'variables.xlsx' en el menú lateral izquierdo para desplegar el modelo.")
+
 
