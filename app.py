@@ -175,7 +175,7 @@ if gdb_cargada:
         Fet_nucleo = (BTe_nucleo + COSe_nucleo) * 0.6
         
         st.markdown("---")
-        st.subheader("📝 Matriz de Variables de Riesgo")
+        st.subheader("📝 Matriz de Variables")
         st.markdown("Haz doble clic en cualquier celda para editar. Al finalizar, presiona el botón de confirmación.")
         
         df_edited = st.data_editor(
@@ -659,3 +659,4 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
+
