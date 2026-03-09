@@ -5,7 +5,7 @@ import scipy.stats as stats
 import plotly.express as px
 import plotly.graph_objects as go
 import io
-import numpy_financial as npf
+import numpy_financial as npf # NUEVA LIBRERÍA PARA LA TIR
 
 # ==============================================================================
 # CONFIGURACIÓN DE LA PÁGINA
@@ -24,6 +24,7 @@ st.sidebar.markdown("Para comenzar, carga tu archivo de parámetros financieros:
 url_plantilla = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/Plantilla_Risk.xlsx"
 st.sidebar.markdown(f"📥 [**Descargar Plantilla variables.xlsx**]({url_plantilla})")
 
+# Nota: Cambié el texto para que el usuario sepa que sube 'variables.xlsx'
 file_risk = st.sidebar.file_uploader("1. Sube tu archivo de variables (.xlsx)", type=["xlsx"])
 st.sidebar.success("2. La base de datos GDB se carga automáticamente.")
 
@@ -183,7 +184,7 @@ if file_risk and gdb_cargada:
         c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha/año")
 
     # --------------------------------------------------------------------------
-    # TAB 3: ANÁLISIS TÉCNICO ECONÓMICO (FLUJO DE CAJA)
+    # TAB 3: ANÁLISIS TÉCNICO ECONÓMICO (NUEVO MÓDULO)
     # --------------------------------------------------------------------------
     with tab3:
         st.subheader("💵 Flujo de Caja y Viabilidad del Proyecto")
@@ -194,6 +195,7 @@ if file_risk and gdb_cargada:
         
         if st.button("Generar Flujo de Caja", type="primary"):
             with st.spinner("Construyendo proyecciones financieras..."):
+                # Creación del DataFrame equivalente a tu script de R
                 anios_arr = np.arange(anio_inicio, anio_inicio + proyeccion + 1)
                 df_tec = pd.DataFrame({'Proyecciones': anios_arr})
                 
@@ -216,13 +218,13 @@ if file_risk and gdb_cargada:
                 df_tec['variabilidad_climatica_tco2e'] = df_tec['cambio_regulacion_tco2e']
                 df_tec['carbono_acreditable_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] - df_tec['salvaguarda_tecnica_tco2e'] - df_tec['cambio_regulacion_tco2e'] - df_tec['variabilidad_climatica_tco2e']
                 
-                # 3. Precios (MERCADO MANUAL)
+                # 3. Precios
                 precios = precio_carbono_input * (1 + float(risk['incremento_precio_carbono'].iloc[3]))**np.arange(0, proyeccion + 1)
                 df_tec['precio_carbono_trading_usd_tco2e'] = 0.0
-                df_tec.loc[1:, 'precio_carbono_trading_usd_tco2e'] = precios[:-1] 
+                df_tec.loc[1:, 'precio_carbono_trading_usd_tco2e'] = precios[:-1] # Desfase equivalente al R
                 df_tec['precio_carbono_ecp_usd_tco2e'] = df_tec['precio_carbono_trading_usd_tco2e']
                 
-                # 4. CAPEX (Aislamiento y Siembra)
+                # 4. CAPEX
                 df_tec['capex_estudios_snc_usd'] = 0.0
                 df_tec.loc[0, 'capex_estudios_snc_usd'] = float(risk['capex_estudios_habilitantes_snc_usd'].iloc[3])
                 
@@ -300,13 +302,13 @@ if file_risk and gdb_cargada:
                 vpn_comunidad_usd = calcular_npv(tasa_descuento, flujos_comunidad)
                 vpn_total = vpn_precio_usd + vpn_comunidad_usd
                 
-                # TIR
+                # TIR con Numpy Financial
                 tir_trading = npf.irr(flujos_trading[:-1]) if len(flujos_trading) > 1 else np.nan
                 
                 carbono_total = df_tec['carbono_acreditable_tco2e'].sum()
                 mac_usd = -(vpn_total / carbono_total) if carbono_total > 0 else np.nan
                 
-                # 10. Resultados Visuales
+                # 10. Visualización de Resultados
                 st.success("Cálculo completado exitosamente.")
                 col_k1, col_k2, col_k3, col_k4 = st.columns(4)
                 col_k1.metric("VPN Trading + Comunidad", f"${vpn_total:,.0f}")
@@ -314,6 +316,7 @@ if file_risk and gdb_cargada:
                 col_k3.metric("Carbono Acreditable", f"{carbono_total:,.0f} tCO2e")
                 col_k4.metric("Costo Marginal (MAC)", f"${mac_usd:,.2f} /tCO2e")
                 
+                # Gráfica de Cascada Flujo de Caja
                 fig_fcl = px.bar(df_tec, x='Proyecciones', y='flujo_caja_libre_trading_usd', 
                                  title="Flujo de Caja Libre (Trading) por Año",
                                  labels={'flujo_caja_libre_trading_usd': 'Flujo (USD)'})
@@ -323,6 +326,7 @@ if file_risk and gdb_cargada:
                 with st.expander("Ver Tabla Detallada (Flujo de Caja)"):
                     st.dataframe(df_tec.style.format(precision=2), use_container_width=True)
                     
+                # Botón Descarga Flujo
                 buf_flujo = io.BytesIO()
                 df_tec.to_excel(buf_flujo, index=False)
                 st.download_button("📥 Descargar Análisis Técnico (.xlsx)", buf_flujo.getvalue(), "Analisis_Tecnico.xlsx")
@@ -350,25 +354,24 @@ if file_risk and gdb_cargada:
         
         st.markdown("---")
         
+        # ⚠️ Exclusiones actualizadas con tus nuevas variables
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento", "precio_carbono_usd_tco2e"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
         def calcular_vpn_iter(v):
             area_total = v["area_total_proyecto_ha"]
-            p_borde = v["relacion_area_efecto_borde"] 
+            p_borde = v["relacion_area_efecto_borde"] # Actualizado a tu nuevo nombre
             area_borde = area_total * p_borde
             area_nucleo = area_total * (1 - p_borde)
             area_sp = area_total * v["relacion_area_sp_area_snc"]
             tasa_captura_ha = (p_borde * tasa_captura_borde) + ((1 - p_borde) * tasa_captura_nucleo)
             
-            # Sincronización con CAPEX y OPEX del Flujo de Caja
-            fac_aisla = 1.0 if v.get("relacion_area_aislamiento_area_snc", 1.0) == 0 else v.get("relacion_area_aislamiento_area_snc", 1.0)
-            siembra = v.get("siembra_arboles", 0.0)
-            
-            capex_snc = v["capex_estudios_habilitantes_snc_usd"] + (v["capex_snc_usd_ha"] * area_borde * fac_aisla) + siembra
+            # Capex con nuevas variables
+            capex_snc = v["capex_estudios_habilitantes_snc_usd"] + (v["capex_snc_usd_ha"] * area_borde)
             capex_sp_total = (v["capex_sp_usd_ha"] * area_sp) * v["variabilidad_sistema_productivo"]
             capex_real = capex_snc + capex_sp_total + (v["factor_imprevistos_snc_usd_ha"] * area_total)
             
+            # Opex con nuevas variables
             opex_snc = (capex_snc * v["operación_relacion_capex_snc"]) + ((v["monitoreo_snc_usd_ha_anio"] + v["factor_salvaguarda_snc_usd_ha_anio"]) * area_total)
             opex_sp = capex_sp_total * v["opex_sp"]
             
@@ -379,7 +382,7 @@ if file_risk and gdb_cargada:
             descuento = v["descuento_salvaguarda_tecnica"] + v["descuento_cambio_regulacion"] + v["descuento_variabilidad_climatica"]
             vol_creditos = area_total * tasa_captura_ha * v["eficiencia_snc"] * (1 - descuento)
             
-            # Precios de Mercado
+            # Precios controlados globalmente por el panel lateral y variable de incremento
             precios = precio_carbono_input * (1 + v["incremento_precio_carbono"])**np.arange(1, anios + 1)
             ingresos = np.zeros(anios + 1)
             ingresos[1:] = vol_creditos * precios
@@ -433,6 +436,7 @@ if file_risk and gdb_cargada:
                     v_actual["area_total_proyecto_ha"] = ha
                     f_escala = factor_sigmoidal(ha)
                     
+                    # Nuevas variables de opex para el escalado
                     v_actual["monitoreo_snc_usd_ha_anio"] *= f_escala
                     v_actual["capex_snc_usd_ha"] *= f_escala
                     v_actual["factor_salvaguarda_snc_usd_ha_anio"] *= f_escala
