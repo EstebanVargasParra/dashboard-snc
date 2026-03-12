@@ -33,6 +33,13 @@ def parse_mixed_type(val):
             return float(val)
     return float(val)
 
+def factor_sigmoidal(area, area_inflexion, mult_max, mult_min, k):
+    """
+    Calcula un factor de escala basado en una curva logística inversa.
+    A menor área, mayor costo. A mayor área, el costo se reduce.
+    """
+    return mult_min + (mult_max - mult_min) / (1 + np.exp(k * (area - area_inflexion)))
+
 # ==============================================================================
 # BASE DE DATOS DE VARIABLES POR DEFECTO
 # ==============================================================================
@@ -186,7 +193,6 @@ if gdb_cargada:
         )
         
         if st.button("✅ Confirmar y Aplicar Variables", type="primary"):
-            # Se eliminó la línea que forzaba Analisis_Parametrico = Probable. Ahora guarda lo que edites.
             st.session_state.df_risk = df_edited.copy()
             st.success("¡Variables guardadas con éxito! Los módulos 3, 4 y 5 están listos.")
 
@@ -195,7 +201,6 @@ if gdb_cargada:
             df_numeric[col] = df_numeric[col].apply(parse_mixed_type)
         
         df_numeric.set_index("Variables", inplace=True)
-        # Normalización de índices
         df_numeric.index = df_numeric.index.str.strip().str.lower()
         risk = df_numeric.T
         risk.index = risk.index.str.strip().str.lower()
@@ -227,7 +232,6 @@ if gdb_cargada:
         c_res1, c_res2, c_res3 = st.columns(3)
         c_res1.metric("Factor Borde", f"{Factor_borde:.4f} tCO2e/ha-año")
         c_res2.metric("Factor Núcleo", f"{Factor_nucleo:.4f} tCO2e/ha-año")
-        # El área paramétrica ahora se actualiza automáticamente al cambiar la celda en la interfaz
         c_res3.metric("Área Total Paramétrica", f"{total_area_risk:,.0f} ha")
 
     # --------------------------------------------------------------------------
@@ -259,7 +263,6 @@ if gdb_cargada:
                 df_tec['area_acumulada_nucleo_anual_ha'] = df_tec['area_nucleo_proyecto_ha'].cumsum()
                 df_tec.loc[df_tec['Proyecciones'] < anio_inicio + 1, ['area_acumulada_borde_anual_ha', 'area_acumulada_nucleo_anual_ha']] = 0.0
                 
-                # REEMPLAZO TOTAL: Usando explícitamente v_param para los cálculos
                 df_tec['emisiones_evitas_eficiencia_tco2e'] = (df_tec['area_acumulada_borde_anual_ha']*Factor_borde + df_tec['area_acumulada_nucleo_anual_ha']*Factor_nucleo) * float(v_param['eficiencia_snc'])
                 df_tec['salvaguarda_tecnica_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(v_param['descuento_salvaguarda_tecnica'])
                 df_tec['cambio_regulacion_tco2e'] = df_tec['emisiones_evitas_eficiencia_tco2e'] * float(v_param['descuento_cambio_regulacion'])
@@ -415,7 +418,6 @@ if gdb_cargada:
         
         st.markdown("---")
         
-        # ⚠️ Incluimos el Precio del Carbono en la simulación de riesgo (Lognormal)
         vars_excluir = ["ingreso_sp", "crecimiento_sp", "horizonte_tiempo_anios", "tasa_descuento"]
         vars_simular = [col for col in risk.columns if col not in vars_excluir]
 
@@ -515,7 +517,6 @@ if gdb_cargada:
                 for var in vars_simular:
                     try:
                         v_min = float(risk[var].loc['bajo'])
-                        # EL AJUSTE FINAL: El valor modal del Monte Carlo vuelve a ser 'probable'
                         v_mode = float(risk[var].loc['probable'])
                         v_max = float(risk[var].loc['alto'])
                         
@@ -570,6 +571,7 @@ if gdb_cargada:
                 st.plotly_chart(fig_tornado, use_container_width=True)
 
                 st.subheader("⚖️ 4. Análisis de Punto de Equilibrio (Curva S)")
+                
                 try:
                     k_steepness = np.log(((mult_max - mult_min) / (eficiencia_base - mult_min)) - 1) / (total_area_risk - area_inflexion)
                 except:
@@ -582,7 +584,9 @@ if gdb_cargada:
                 for ha in areas_simuladas:
                     v_actual = v_base.copy()
                     v_actual["area_total_proyecto_ha"] = ha
-                    f_escala = factor_sigmoidal(ha)
+                    
+                    # AQUÍ SE APLICÓ LA CORRECCIÓN
+                    f_escala = factor_sigmoidal(ha, area_inflexion, mult_max, mult_min, k_steepness)
                     
                     v_actual["monitoreo_snc_usd_ha_anio"] *= f_escala
                     v_actual["capex_snc_usd_ha"] *= f_escala
@@ -662,5 +666,3 @@ if gdb_cargada:
 
 else:
     st.info("Cargando sistema de base de datos GDB...")
-
-
